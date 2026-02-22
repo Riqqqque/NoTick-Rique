@@ -1,3 +1,4 @@
+1.1.6 - Multiplayer hardening pass: fixed claimed-chunk item ticking, removed duplicate aliases, OP-only `/notick`, safer optional-claim integration fallback with warnings, and branding/license cleanup
 1.1.5 - Rebranded to NoTick, removed external hard dependencies, and improved optional integration fallbacks
 1.1.4 - Disable on client by default
 1.1.3 - Increase default ticking distance around chunks marked as active
