@@ -13,12 +13,12 @@ public class EntityTypeMixin implements Tickable.EntityType {
     @Shadow @Final private Holder.Reference<EntityType<?>> builtInRegistryHolder;
 
     @Override
-    public boolean doespotatotick$shouldAlwaysTick() {
+    public boolean notick$shouldAlwaysTick() {
         return NoTick.isEntityTypeWhitelisted(builtInRegistryHolder.key().location());
     }
 
     @Override
-    public boolean doespotatotick$shouldAlwaysTickInRaid() {
+    public boolean notick$shouldAlwaysTickInRaid() {
         return NoTick.isRaidEntityTypeWhitelisted(builtInRegistryHolder.key().location());
     }
 }

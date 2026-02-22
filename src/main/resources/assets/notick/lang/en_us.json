@@ -1,4 +1,1 @@
-{
-  "notick.warn.1": "NoTick is installed on this server. If your mob farm stops working from far away, claim its chunks with FTB Chunks / OPAC. You can disable this message in NoTick config.",
-  "notick.warn.2": "NoTick is installed but FTB Chunks is not. If your mob farm stops working from far away, install FTB Chunks / OPAC and claim its chunks. You can disable this message in NoTick config."
-}
+{}

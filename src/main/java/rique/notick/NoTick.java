@@ -28,6 +28,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -96,6 +98,7 @@ import java.util.concurrent.ThreadLocalRandom;
 #endif
 public class NoTick #if FABRIC implements ModInitializer #endif{
     public static final String MOD_ID = "no_ticks";
+    private static final Logger LOGGER = LoggerFactory.getLogger(NoTick.class);
     private static final byte UNKNOWN = -1;
     private static final byte FALSE = 0;
     private static final byte TRUE = 1;
@@ -131,6 +134,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
     private static final Map<Level, ChunkBoolCache> ACTIVE_CHUNK_CACHE = new WeakHashMap<>();
     private static final Map<Level, ChunkBoolCache> CLAIMED_CHUNK_CACHE = new WeakHashMap<>();
+    private static final Map<Level, PlayerSpatialCache> PLAYER_SPATIAL_CACHE = new WeakHashMap<>();
 
     static {
         List<? extends String> itemList = ObjectArrayList.wrap(new String[]{"minecraft:cobblestone"});
@@ -211,6 +215,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
     private static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("notick")
+                .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("status").executes(context -> executeStatusCommand(context.getSource())))
                 .executes(context -> executeStatusCommand(context.getSource())));
     }
@@ -277,16 +282,16 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 return true;
         }
 
-        if (isOptimizableItemEntity(entity))
-            return ThreadLocalRandom.current().nextInt(100) < ITEM_TICK_CHANCE_PERCENT.get();
+        EntityType<?> entityType = entity.getType();
+        if (((Tickable.EntityType) entityType).notick$shouldAlwaysTick())
+            return true;
 
         BlockPos entityPos = entity.blockPosition();
         if (isInClaimedChunk(level, entityPos))
             return true;
 
-        EntityType<?> entityType = entity.getType();
-        if (((Tickable.EntityType) entityType).doespotatotick$shouldAlwaysTick())
-            return true;
+        if (isOptimizableItemEntity(entity))
+            return ThreadLocalRandom.current().nextInt(100) < ITEM_TICK_CHANCE_PERCENT.get();
 
         if (shouldTickInRaid(level, entityPos, entityType, entity))
             return true;
@@ -297,7 +302,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     private static boolean shouldTickInRaid(Level level, BlockPos blockPos, EntityType<?> entityType, Entity entity) {
         if (level instanceof ServerLevel && ((ServerLevel) level).isRaided(blockPos)) {
             if (entity instanceof Raider) return TICKING_RAIDER_ENTITIES_IN_RAID.get();
-            return ((Tickable.EntityType)entityType).doespotatotick$shouldAlwaysTickInRaid();
+            return ((Tickable.EntityType)entityType).notick$shouldAlwaysTickInRaid();
         }
         return false;
     }
@@ -342,16 +347,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         int posY = pos.getY();
         int posZ = pos.getZ();
         int maxHeight = LIVING_VERTICAL_TICK_DIST.get();
-        int maxDistSquared = LIVING_HORIZONTAL_TICK_DIST.get();
-        maxDistSquared *= maxDistSquared;
-        for (Player player : level.players()) {
-            if (Math.abs(player.getY() - posY) < maxHeight) {
-                double x = player.getX() - posX;
-                double z = player.getZ() - posZ;
-                if ((x * x + z * z) < maxDistSquared) return true;
-            }
-        }
-        return false;
+        int maxDistance = LIVING_HORIZONTAL_TICK_DIST.get();
+        long maxDistSquared = (long) maxDistance * maxDistance;
+        PlayerSpatialCache playerSpatialCache = getPlayerSpatialCache(level, maxDistance);
+        return playerSpatialCache.isNear(posX, posY, posZ, maxHeight, maxDistSquared);
     }
 
     public static boolean isEntityTypeWhitelisted(@NotNull ResourceLocation id) {
@@ -405,6 +404,18 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
     }
 
+    private static PlayerSpatialCache getPlayerSpatialCache(Level level, int horizontalDistanceBlocks) {
+        synchronized (PLAYER_SPATIAL_CACHE) {
+            PlayerSpatialCache cache = PLAYER_SPATIAL_CACHE.get(level);
+            if (cache == null) {
+                cache = new PlayerSpatialCache();
+                PLAYER_SPATIAL_CACHE.put(level, cache);
+            }
+            cache.refresh(level, horizontalDistanceBlocks);
+            return cache;
+        }
+    }
+
     private static Set<String> entityWhitelist() {
         return ENTITIES_WHITELIST_CACHE.get(ENTITIES_WHITELIST.get());
     }
@@ -442,6 +453,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
         synchronized (CLAIMED_CHUNK_CACHE) {
             CLAIMED_CHUNK_CACHE.clear();
+        }
+        synchronized (PLAYER_SPATIAL_CACHE) {
+            PLAYER_SPATIAL_CACHE.clear();
         }
         ChunkActivityTrackerCompat.clear();
     }
@@ -535,8 +549,71 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
     }
 
+    private static final class PlayerSpatialCache {
+        private long gameTime = Long.MIN_VALUE;
+        private int chunkRadius = -1;
+        private final ObjectArrayList<Player> players = new ObjectArrayList<>();
+        private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<ObjectArrayList<Player>> playersByChunk = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+
+        private void refresh(Level level, int horizontalDistanceBlocks) {
+            long now = level.getGameTime();
+            int nextChunkRadius = (int) Math.ceil(horizontalDistanceBlocks / 16.0D);
+            if (now == gameTime && nextChunkRadius == chunkRadius) return;
+
+            gameTime = now;
+            chunkRadius = nextChunkRadius;
+            players.clear();
+            playersByChunk.clear();
+
+            for (Player player : level.players()) {
+                players.add(player);
+                ChunkPos chunkPos = player.chunkPosition();
+                long key = ChunkPos.asLong(chunkPos.x, chunkPos.z);
+                ObjectArrayList<Player> bucket = playersByChunk.get(key);
+                if (bucket == null) {
+                    bucket = new ObjectArrayList<>();
+                    playersByChunk.put(key, bucket);
+                }
+                bucket.add(player);
+            }
+        }
+
+        private boolean isNear(int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
+            if (players.isEmpty()) return false;
+
+            if (players.size() <= 4 || chunkRadius > 16) {
+                for (Player player : players) {
+                    if (isNearPlayer(player, posX, posY, posZ, maxHeight, maxDistSquared)) return true;
+                }
+                return false;
+            }
+
+            int chunkX = posX >> 4;
+            int chunkZ = posZ >> 4;
+            for (int x = -chunkRadius; x <= chunkRadius; x++) {
+                for (int z = -chunkRadius; z <= chunkRadius; z++) {
+                    long key = ChunkPos.asLong(chunkX + x, chunkZ + z);
+                    ObjectArrayList<Player> bucket = playersByChunk.get(key);
+                    if (bucket == null) continue;
+                    for (Player player : bucket) {
+                        if (isNearPlayer(player, posX, posY, posZ, maxHeight, maxDistSquared)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static boolean isNearPlayer(Player player, int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
+            if (Math.abs(player.getY() - posY) >= maxHeight) return false;
+            double x = player.getX() - posX;
+            double z = player.getZ() - posZ;
+            return (x * x + z * z) < maxDistSquared;
+        }
+    }
+
     private static final class ChunkActivityTrackerCompat {
         private static final MethodHandle GET_TOTAL_TIME_IN_CHUNK = resolve();
+        private static boolean warnedExternalTrackerFailure;
 
         private static long getTotalTimeInChunk(Level level, ChunkPos chunkPos) {
             MethodHandle handle = GET_TOTAL_TIME_IN_CHUNK;
@@ -546,7 +623,11 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
             try {
                 return (long) handle.invoke(level, chunkPos);
-            } catch (Throwable ignored) {
+            } catch (Throwable throwable) {
+                if (!warnedExternalTrackerFailure) {
+                    warnedExternalTrackerFailure = true;
+                    LOGGER.warn("[NoTick] External Chunk Activity Tracker call failed; falling back to internal tracker.", throwable);
+                }
                 return InternalChunkActivityTracker.getTotalTimeInChunk(level, chunkPos);
             }
         }
@@ -564,7 +645,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 Class<?> clazz = Class.forName("toni.chunkactivitytracker.ChunkActivityTracker");
                 MethodType type = MethodType.methodType(long.class, Level.class, ChunkPos.class);
                 return MethodHandles.publicLookup().findStatic(clazz, "getTotalTimeInChunk", type);
-            } catch (Throwable ignored) {
+            } catch (ClassNotFoundException ignored) {
+                return null;
+            } catch (Throwable throwable) {
+                LOGGER.warn("[NoTick] External Chunk Activity Tracker is present but incompatible; internal tracker will be used.", throwable);
                 return null;
             }
         }

@@ -15,3 +15,19 @@ blahaj {
 		}
 	}
 }
+
+afterEvaluate {
+	val setupChiseledBuild = tasks.findByName("setupChiseledBuild") ?: return@afterEvaluate
+	listOf(
+		"compileJava",
+		"processResources",
+		"classes",
+		"jar",
+		"sourcesJar",
+		"build",
+		"remapJar",
+		"remapSourcesJar"
+	).forEach { taskName ->
+		tasks.findByName(taskName)?.dependsOn(setupChiseledBuild)
+	}
+}
