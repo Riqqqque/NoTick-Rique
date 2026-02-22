@@ -213,9 +213,6 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         dispatcher.register(Commands.literal("notick")
                 .then(Commands.literal("status").executes(context -> executeStatusCommand(context.getSource())))
                 .executes(context -> executeStatusCommand(context.getSource())));
-        dispatcher.register(Commands.literal("noticks")
-                .then(Commands.literal("status").executes(context -> executeStatusCommand(context.getSource())))
-                .executes(context -> executeStatusCommand(context.getSource())));
     }
 
     private static int executeStatusCommand(CommandSourceStack source) {
@@ -480,16 +477,23 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     #if FORGE
     private void onForgePlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!SEND_MESSAGE.get()) return;
-        event.getEntity().displayClientMessage(Component.translatable(IS_FTB_CHUNKS_PRESENT ? "notick.warn.1" : "notick.warn.2"), false);
+        event.getEntity().displayClientMessage(Component.literal(getLoginWarningText()), false);
     }
     #endif
 
     #if NEO
     private void onNeoPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!SEND_MESSAGE.get()) return;
-        event.getEntity().displayClientMessage(Component.translatable(IS_FTB_CHUNKS_PRESENT ? "notick.warn.1" : "notick.warn.2"), false);
+        event.getEntity().displayClientMessage(Component.literal(getLoginWarningText()), false);
     }
     #endif
+
+    private static String getLoginWarningText() {
+        if (IS_FTB_CHUNKS_PRESENT) {
+            return "NoTick is installed on this server. If your mob farm stops working from far away, claim its chunks with FTB Chunks / OPAC. You can disable this message in NoTick config.";
+        }
+        return "NoTick is installed but FTB Chunks is not. If your mob farm stops working from far away, install FTB Chunks / OPAC and claim its chunks. You can disable this message in NoTick config.";
+    }
 
     private static final class StringSetCache {
         private List<? extends String> lastSource;
