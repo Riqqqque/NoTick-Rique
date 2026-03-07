@@ -173,7 +173,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         ACTIVE_CHUNK_SECONDS_THRESHOLD = builder.comment("Chunk activity threshold in seconds. Chunks with activity above this value are protected from entity tick skipping.").defineInRange("ActiveChunkSecondsThreshold", 15, 1, Integer.MAX_VALUE);
         builder.pop();
         builder.push("Item Entities Tick Settings");
-        OPTIMIZE_ITEM_MOVEMENT = builder.comment("Apply probabilistic ticking to non-whitelisted item entities.").define("OptimizeItemMovement", false);
+        OPTIMIZE_ITEM_MOVEMENT = builder.comment("Apply probabilistic ticking to non-whitelisted item entities outside player range.").define("OptimizeItemMovement", false);
         ITEM_TICK_CHANCE_PERCENT = builder.comment("Tick chance for non-whitelisted item entities when item optimization is enabled. 75 means items tick on 75% of game ticks.").defineInRange("ItemTickChancePercent", 75, 1, 100);
         ITEMS_WHITELIST = builder.comment("If you don't want to let a specific item entity in the world to be effected by the optimization, you can write its registry name down here.", "Require 'OptimizeItemMovement' to be true").defineList("ItemWhiteList", itemList, Predicates.alwaysTrue());
         builder.pop();
@@ -290,13 +290,17 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         if (isInClaimedChunk(level, entityPos))
             return true;
 
-        if (isOptimizableItemEntity(entity))
+        boolean nearPlayer = isNearPlayer(level, entityPos);
+
+        if (isOptimizableItemEntity(entity)) {
+            if (nearPlayer) return true;
             return ThreadLocalRandom.current().nextInt(100) < ITEM_TICK_CHANCE_PERCENT.get();
+        }
 
         if (shouldTickInRaid(level, entityPos, entityType, entity))
             return true;
 
-        return isNearPlayer(level, entityPos);
+        return nearPlayer;
     }
 
     private static boolean shouldTickInRaid(Level level, BlockPos blockPos, EntityType<?> entityType, Entity entity) {
@@ -503,19 +507,19 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     #endif
 
     private static String getLoginWarningText() {
-        if (IS_FTB_CHUNKS_PRESENT) {
-            return "NoTick is installed on this server. If your mob farm stops working from far away, claim its chunks with FTB Chunks / OPAC. You can disable this message in NoTick config.";
+        if (IS_FTB_CHUNKS_PRESENT || IS_OPAC_PRESENT) {
+            return "NoTick is installed on this server. If your mob farm stops working from far away, claim its chunks with your installed chunk-claim mod. You can disable this message in NoTick config.";
         }
-        return "NoTick is installed but FTB Chunks is not. If your mob farm stops working from far away, install FTB Chunks / OPAC and claim its chunks. You can disable this message in NoTick config.";
+        return "NoTick is installed but no supported chunk-claim mod is present. If your mob farm stops working from far away, install FTB Chunks / OPAC and claim its chunks. You can disable this message in NoTick config.";
     }
 
     private static final class StringSetCache {
-        private List<? extends String> lastSource;
+        private boolean initialized;
         private Set<String> cached = Set.of();
 
         private synchronized Set<String> get(List<? extends String> source) {
-            if (source == lastSource) return cached;
-            lastSource = source;
+            if (initialized) return cached;
+            initialized = true;
             HashSet<String> rebuilt = new HashSet<>(source.size());
             for (String entry : source) {
                 if (entry != null && !entry.isBlank()) {
@@ -527,7 +531,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
 
         private synchronized void clear() {
-            lastSource = null;
+            initialized = false;
             cached = Set.of();
         }
     }
@@ -604,10 +608,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
 
         private static boolean isNearPlayer(Player player, int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
-            if (Math.abs(player.getY() - posY) >= maxHeight) return false;
+            if (Math.abs(player.getY() - posY) > maxHeight) return false;
             double x = player.getX() - posX;
             double z = player.getZ() - posZ;
-            return (x * x + z * z) < maxDistSquared;
+            return (x * x + z * z) <= maxDistSquared;
         }
     }
 

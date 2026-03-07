@@ -18,6 +18,7 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
 
     private static volatile boolean initialized;
     private static volatile boolean available;
+    private static volatile boolean disabled;
     private static volatile boolean warnedFailure;
     private static volatile Method apiMethod;
     private static volatile Method isManagerLoadedMethod;
@@ -27,6 +28,7 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
 
     @Override
     public boolean isInClaimedChunk(Level level, BlockPos pos) {
+        if (disabled) return true;
         if (!ensureInitialized()) {
             warnFailure("Failed to initialize FTB Chunks integration", null);
             return true;
@@ -57,14 +59,14 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
             Object manager = managerMethod.invoke(api);
             Map<?, ?> claimedChunks = getClaimedChunks(manager);
             if (claimedChunks == null) {
-                warnFailure("FTB Chunks manager did not expose claimed chunk data", null);
+                disable("FTB Chunks manager did not expose claimed chunk data", null);
                 return true;
             }
 
             Object chunkPosKey = chunkDimPosConstructor.newInstance(level, pos);
             return claimedChunks.containsKey(chunkPosKey);
         } catch (ReflectiveOperationException | ClassCastException exception) {
-            warnFailure("FTB Chunks claim lookup failed", exception);
+            disable("FTB Chunks claim lookup failed", exception);
             return true;
         }
     }
@@ -117,5 +119,10 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
         } else {
             LOGGER.warn("[NoTick] {}. Falling back to fail-open chunk protection for gameplay safety.", message, throwable);
         }
+    }
+
+    private static void disable(String message, Throwable throwable) {
+        disabled = true;
+        warnFailure(message, throwable);
     }
 }

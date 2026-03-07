@@ -46,3 +46,4 @@ replay_*.log
 *.jfr
 
 server_run/
+src/main/build.properties
