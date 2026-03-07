@@ -18,6 +18,27 @@ blahaj {
 
 afterEvaluate {
 	val setupChiseledBuild = tasks.findByName("setupChiseledBuild") ?: return@afterEvaluate
+	val minecraftVersion = name.substringBeforeLast("-")
+	val loader = name.substringAfterLast("-")
+	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
+	val neoForgeVersionLine = if (loader == "neoforge") {
+		val versionParts = minecraftVersion.split(".")
+		val neoForgeLine = if (versionParts.size >= 3) {
+			"[${versionParts[1]}.${versionParts[2]},)"
+		} else {
+			"[${minecraftVersion.removePrefix("1.")},)"
+		}
+		"""[[dependencies."$modId"]]
+modId="neoforge"
+mandatory=true
+versionRange="$neoForgeLine"
+ordering="NONE"
+side="BOTH"
+
+"""
+	} else {
+		""
+	}
 	val resourceExcludes = when {
 		name.endsWith("-fabric") -> listOf("META-INF/mods.toml", "META-INF/neoforge.mods.toml")
 		name.endsWith("-neoforge") -> listOf("fabric.mod.json", "META-INF/mods.toml")
@@ -79,6 +100,43 @@ afterEvaluate {
 	tasks.findByName("processResources")?.dependsOn(syncChiseledResources)
 	tasks.withType(org.gradle.language.jvm.tasks.ProcessResources::class.java).configureEach {
 		exclude(resourceExcludes)
+		doLast {
+			val resourcesDir = destinationDir
+			val fabricModJson = resourcesDir.resolve("fabric.mod.json")
+			if (fabricModJson.exists()) {
+				fabricModJson.writeText(
+					fabricModJson.readText().replace(
+						Regex("""("minecraft"\s*:\s*")[^"]+(")"""),
+						"""$1$minecraftVersion$2"""
+					)
+				)
+			}
+
+			val tomlPattern = Regex(
+				"""(\[\[dependencies\."[^"]+"\]\]\s*modId="minecraft"\s*mandatory=true\s*versionRange=")[^"]+(")""",
+				setOf(RegexOption.DOT_MATCHES_ALL)
+			)
+			listOf(
+				resourcesDir.resolve("META-INF/mods.toml"),
+				resourcesDir.resolve("META-INF/neoforge.mods.toml")
+			).forEach { descriptor ->
+				if (!descriptor.exists()) return@forEach
+
+				var descriptorText = descriptor.readText().replace(
+					tomlPattern,
+					"""$1[$minecraftVersion]$2"""
+				)
+
+				if (descriptor.name == "neoforge.mods.toml" && neoForgeVersionLine.isNotEmpty() && !descriptorText.contains("""modId="neoforge"""")) {
+					descriptorText = descriptorText.replaceFirst(
+						Regex("""(?=\[\[dependencies\."[^"]+"\]\]\s*modId="minecraft")"""),
+						Regex.escapeReplacement(neoForgeVersionLine)
+					)
+				}
+
+				descriptor.writeText(descriptorText)
+			}
+		}
 	}
 	tasks.findByName("sourcesJar")?.dependsOn(syncChiseledJava, syncChiseledResources)
 	tasks.findByName("build")?.finalizedBy(syncRootUploadJars)
