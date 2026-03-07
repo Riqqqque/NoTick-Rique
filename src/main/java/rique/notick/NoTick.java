@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.nio.file.Files;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -50,7 +51,9 @@ import java.util.concurrent.ThreadLocalRandom;
 
     #if after_21_1
     import fuzs.forgeconfigapiport.fabric.api.neoforge.v4.NeoForgeConfigRegistry;
+    import net.neoforged.fml.config.ConfigTracker;
     import net.neoforged.fml.config.ModConfig;
+    import net.neoforged.fml.config.ModConfigs;
     import net.neoforged.neoforge.common.ModConfigSpec;
     import net.neoforged.neoforge.common.ModConfigSpec.*;
     #endif
@@ -59,6 +62,7 @@ import java.util.concurrent.ThreadLocalRandom;
     import fuzs.forgeconfigapiport.api.config.v2.ForgeConfigRegistry;
     import net.minecraftforge.common.ForgeConfigSpec;
     import net.minecraftforge.common.ForgeConfigSpec.*;
+    import net.minecraftforge.fml.config.ConfigTracker;
     import net.minecraftforge.fml.config.ModConfig;
     #endif
 #endif
@@ -70,6 +74,7 @@ import java.util.concurrent.ThreadLocalRandom;
     import net.minecraftforge.fml.ModLoadingContext;
     import net.minecraftforge.fml.common.Mod;
     import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+    import net.minecraftforge.fml.config.ConfigTracker;
     import net.minecraftforge.fml.config.ModConfig;
     import net.minecraftforge.fml.event.config.ModConfigEvent;
     import net.minecraftforge.fml.loading.FMLLoader;
@@ -84,7 +89,9 @@ import java.util.concurrent.ThreadLocalRandom;
     import net.neoforged.fml.common.Mod;
     import net.neoforged.bus.api.IEventBus;
     import net.neoforged.fml.ModContainer;
+    import net.neoforged.fml.config.ConfigTracker;
     import net.neoforged.fml.config.ModConfig;
+    import net.neoforged.fml.config.ModConfigs;
     import net.neoforged.fml.event.config.ModConfigEvent;
     import net.neoforged.neoforge.common.NeoForge;
     import net.neoforged.neoforge.common.ModConfigSpec;
@@ -220,6 +227,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("help").executes(context -> executeHelpCommand(context.getSource())))
                 .then(Commands.literal("here").executes(context -> executeHereCommand(context.getSource())))
+                .then(Commands.literal("reload").executes(context -> executeReloadCommand(context.getSource())))
                 .then(Commands.literal("status").executes(context -> executeStatusCommand(context.getSource())))
                 .executes(context -> executeStatusCommand(context.getSource())));
     }
@@ -238,6 +246,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                         .append(Component.literal(" (radius " + ACTIVE_CHUNK_RADIUS.get() + ", threshold " + ACTIVE_CHUNK_SECONDS_THRESHOLD.get() + "s)").withStyle(ChatFormatting.DARK_GRAY))));
         sendCommandLine(source, labeledLine("Integrations", integrationLine()));
         sendCommandLine(source, infoLine("/notick here", "show current chunk diagnostics"));
+        sendCommandLine(source, infoLine("/notick reload", "reload the config from disk"));
         sendCommandLine(source, infoLine("/notick help", "show command help"));
 
         if (source.getEntity() instanceof Player) {
@@ -282,9 +291,37 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         sendCommandLine(source, infoLine("/notick", "show current optimization status"));
         sendCommandLine(source, infoLine("/notick status", "show current optimization status"));
         sendCommandLine(source, infoLine("/notick here", "show current chunk diagnostics"));
+        sendCommandLine(source, infoLine("/notick reload", "reload the config from disk"));
         sendCommandLine(source, infoLine("/notick help", "show this help page"));
 
         return 1;
+    }
+
+    private static int executeReloadCommand(CommandSourceStack source) {
+        sendCommandLine(source, commandHeader("Reload", "Refreshing config from disk"));
+
+        try {
+            int reloadedConfigs = reloadCommonConfigs();
+            if (reloadedConfigs <= 0) {
+                sendCommandLine(source, infoLine("Unavailable", "No loaded common config was found"));
+                return 0;
+            }
+
+            clearCaches();
+            sendCommandLine(source, labeledLine("Reloaded configs", Component.literal(String.valueOf(reloadedConfigs)).withStyle(ChatFormatting.GREEN)));
+            sendCommandLine(source, infoLine("Result", "Config values and caches were refreshed"));
+            return 1;
+        } catch (Exception exception) {
+            LOGGER.error("Failed to reload NoTick config from disk", exception);
+
+            String errorMessage = exception.getMessage();
+            if (errorMessage == null || errorMessage.isBlank()) {
+                errorMessage = exception.getClass().getSimpleName();
+            }
+
+            sendCommandLine(source, labeledLine("Reload failed", Component.literal(errorMessage).withStyle(ChatFormatting.RED)));
+            return 0;
+        }
     }
 
     private static void sendCommandLine(CommandSourceStack source, Component component) {
@@ -330,6 +367,44 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 .append(Component.literal("External CAT ").withStyle(ChatFormatting.GRAY))
                 .append(yesNoComponent(ChunkActivityTrackerCompat.isExternalAvailable()));
     }
+
+    private static int reloadCommonConfigs() throws Exception {
+        int reloadedConfigs = 0;
+
+        #if current_20_1
+        ModConfig commonConfig = findLegacyCommonConfig();
+        if (commonConfig == null) return 0;
+
+        commonConfig.acceptSyncedConfig(Files.readAllBytes(commonConfig.getFullPath()));
+        reloadedConfigs++;
+        #else
+        for (ModConfig modConfig : ModConfigs.getModConfigs(MOD_ID)) {
+            if (modConfig.getType() != ModConfig.Type.COMMON) continue;
+
+            ConfigTracker.acceptSyncedConfig(modConfig, Files.readAllBytes(modConfig.getFullPath()));
+            reloadedConfigs++;
+        }
+        #endif
+
+        return reloadedConfigs;
+    }
+
+    #if current_20_1
+    private static @Nullable ModConfig findLegacyCommonConfig() {
+        ModConfig config = ConfigTracker.INSTANCE.fileMap().get(MOD_ID + "-common.toml");
+        if (config != null && config.getType() == ModConfig.Type.COMMON && MOD_ID.equals(config.getModId())) {
+            return config;
+        }
+
+        for (ModConfig trackedConfig : ConfigTracker.INSTANCE.configSets().get(ModConfig.Type.COMMON)) {
+            if (MOD_ID.equals(trackedConfig.getModId())) {
+                return trackedConfig;
+            }
+        }
+
+        return null;
+    }
+    #endif
 
     public static boolean isTickable(@NotNull Entity entity) {
         if (entity instanceof Player)

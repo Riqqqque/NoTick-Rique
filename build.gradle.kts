@@ -21,6 +21,7 @@ afterEvaluate {
 	val minecraftVersion = name.substringBeforeLast("-")
 	val loader = name.substringAfterLast("-")
 	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
+	val artifactBaseName = "${rootProject.name}-$loader"
 	val neoForgeVersionLine = if (loader == "neoforge") {
 		val versionParts = minecraftVersion.split(".")
 		val neoForgeLine = if (versionParts.size >= 3) {
@@ -39,6 +40,9 @@ side="BOTH"
 	} else {
 		""
 	}
+	tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java).configureEach {
+		archiveBaseName.set(artifactBaseName)
+	}
 	val resourceExcludes = when {
 		name.endsWith("-fabric") -> listOf("META-INF/mods.toml", "META-INF/neoforge.mods.toml")
 		name.endsWith("-neoforge") -> listOf("fabric.mod.json", "META-INF/mods.toml")
@@ -53,6 +57,7 @@ side="BOTH"
 			doFirst {
 				delete(
 					rootProject.fileTree(rootProject.layout.buildDirectory.dir("libs")) {
+						include("NoTick-*.jar")
 						include("no_ticks-*.jar")
 					}
 				)
@@ -73,7 +78,7 @@ side="BOTH"
 	}
 	syncRootUploadJars.configure {
 		from(layout.buildDirectory.dir("libs")) {
-			include("no_ticks-*.jar")
+			include("NoTick-*.jar")
 			exclude("*-sources.jar")
 		}
 	}
