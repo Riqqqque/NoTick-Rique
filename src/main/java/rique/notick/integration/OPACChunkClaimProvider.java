@@ -16,6 +16,7 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
 
     private static volatile boolean initialized;
     private static volatile boolean available;
+    private static volatile boolean disabled;
     private static volatile boolean warnedFailure;
     private static volatile Method getServerApiMethod;
     private static volatile Method getServerClaimsManagerMethod;
@@ -23,6 +24,7 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
 
     @Override
     public boolean isInClaimedChunk(Level level, BlockPos pos) {
+        if (disabled) return true;
         if (level.isClientSide) return false;
 
         MinecraftServer server = level.getServer();
@@ -64,7 +66,7 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
             Object claim = claimMethod.invoke(claimsManager, dimension, new ChunkPos(pos));
             return claim != null;
         } catch (ReflectiveOperationException | ClassCastException exception) {
-            warnFailure("OPAC claim lookup failed", exception);
+            disable("OPAC claim lookup failed", exception);
             return true;
         }
     }
@@ -93,5 +95,10 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
         } else {
             LOGGER.warn("[NoTick] {}. Falling back to fail-open chunk protection for gameplay safety.", message, throwable);
         }
+    }
+
+    private static void disable(String message, Throwable throwable) {
+        disabled = true;
+        warnFailure(message, throwable);
     }
 }
