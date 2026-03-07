@@ -2,10 +2,12 @@ package rique.notick;
 
 import com.google.common.base.Predicates;
 import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.monster.Slime;
@@ -216,38 +218,117 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     private static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("notick")
                 .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("help").executes(context -> executeHelpCommand(context.getSource())))
+                .then(Commands.literal("here").executes(context -> executeHereCommand(context.getSource())))
                 .then(Commands.literal("status").executes(context -> executeStatusCommand(context.getSource())))
                 .executes(context -> executeStatusCommand(context.getSource())));
     }
 
     private static int executeStatusCommand(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("[NoTick] EntityTicking=" + OPTIMIZE_ENTITIES_TICKING.get()
-                + ", ItemTicking=" + OPTIMIZE_ITEM_MOVEMENT.get()
-                + " (" + ITEM_TICK_CHANCE_PERCENT.get() + "% chance)"), false);
-        source.sendSuccess(() -> Component.literal("[NoTick] ActiveChunkProtection=" + DISABLE_IN_ACTIVE_CHUNKS.get()
-                + " (radius=" + ACTIVE_CHUNK_RADIUS.get() + ", threshold=" + ACTIVE_CHUNK_SECONDS_THRESHOLD.get() + "s)"), false);
-        source.sendSuccess(() -> Component.literal("[NoTick] Integrations: FTBChunks="
-                + (FTB_CLAIM_PROVIDER != null) + ", OPAC=" + (OPAC_CLAIM_PROVIDER != null)
-                + ", ExternalCAT=" + ChunkActivityTrackerCompat.isExternalAvailable()), false);
+        sendCommandLine(source, commandHeader("Status", "Current optimization settings"));
+        sendCommandLine(source, labeledLine("Entity ticking optimization", enabledDisabledComponent(OPTIMIZE_ENTITIES_TICKING.get())));
+        sendCommandLine(source, labeledLine("Item ticking optimization",
+                enabledDisabledComponent(OPTIMIZE_ITEM_MOVEMENT.get())
+                        .append(Component.literal(" (" + ITEM_TICK_CHANCE_PERCENT.get() + "% distant item tick chance)").withStyle(ChatFormatting.DARK_GRAY))));
+        sendCommandLine(source, labeledLine("Player range",
+                Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " vertical")
+                        .withStyle(ChatFormatting.AQUA)));
+        sendCommandLine(source, labeledLine("Active chunk protection",
+                enabledDisabledComponent(DISABLE_IN_ACTIVE_CHUNKS.get())
+                        .append(Component.literal(" (radius " + ACTIVE_CHUNK_RADIUS.get() + ", threshold " + ACTIVE_CHUNK_SECONDS_THRESHOLD.get() + "s)").withStyle(ChatFormatting.DARK_GRAY))));
+        sendCommandLine(source, labeledLine("Integrations", integrationLine()));
+        sendCommandLine(source, infoLine("/notick here", "show current chunk diagnostics"));
+        sendCommandLine(source, infoLine("/notick help", "show command help"));
 
-        Entity sourceEntity = source.getEntity();
-        if (sourceEntity instanceof Player player) {
-            Level level = player.level();
-            BlockPos pos = player.blockPosition();
-            ChunkPos chunk = player.chunkPosition();
-            boolean optimizableDimension = isOptimizableDim(level);
-            boolean claimedChunk = isInClaimedChunk(level, pos);
-            boolean activeChunk = isInOrNearActiveChunk(level, chunk);
-            source.sendSuccess(() -> Component.literal("[NoTick] Here: dim=" + level.dimension().location()
-                    + ", chunk=" + chunk.x + "," + chunk.z
-                    + ", dimOptimized=" + optimizableDimension
-                    + ", claimed=" + claimedChunk
-                    + ", activeProtected=" + activeChunk), false);
+        if (source.getEntity() instanceof Player) {
+            sendCommandLine(source, infoLine("Tip", "Run /notick here for local chunk checks"));
         } else {
-            source.sendSuccess(() -> Component.literal("[NoTick] Run as a player to view current chunk diagnostics."), false);
+            sendCommandLine(source, infoLine("Tip", "Run /notick here as a player for local chunk checks"));
         }
 
         return 1;
+    }
+
+    private static int executeHereCommand(CommandSourceStack source) {
+        Entity sourceEntity = source.getEntity();
+        if (!(sourceEntity instanceof Player player)) {
+            sendCommandLine(source, commandHeader("Here", "Local chunk diagnostics"));
+            sendCommandLine(source, infoLine("Unavailable", "This command must be run by a player"));
+            return 0;
+        }
+
+        Level level = player.level();
+        BlockPos pos = player.blockPosition();
+        ChunkPos chunk = player.chunkPosition();
+        boolean optimizableDimension = isOptimizableDim(level);
+        boolean claimedChunk = isInClaimedChunk(level, pos);
+        boolean activeChunk = isInOrNearActiveChunk(level, chunk);
+
+        sendCommandLine(source, commandHeader("Here", "Current chunk diagnostics"));
+        sendCommandLine(source, labeledLine("Dimension", Component.literal(level.dimension().location().toString()).withStyle(ChatFormatting.AQUA)));
+        sendCommandLine(source, labeledLine("Chunk", Component.literal(chunk.x + ", " + chunk.z).withStyle(ChatFormatting.AQUA)));
+        sendCommandLine(source, labeledLine("Optimization applies in this dimension", yesNoComponent(optimizableDimension)));
+        sendCommandLine(source, labeledLine("Claimed chunk protection", yesNoComponent(claimedChunk)));
+        sendCommandLine(source, labeledLine("Active chunk protection", yesNoComponent(activeChunk)));
+        sendCommandLine(source, labeledLine("Nearby player range",
+                Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " vertical")
+                        .withStyle(ChatFormatting.AQUA)));
+
+        return 1;
+    }
+
+    private static int executeHelpCommand(CommandSourceStack source) {
+        sendCommandLine(source, commandHeader("Help", "Available admin commands"));
+        sendCommandLine(source, infoLine("/notick", "show current optimization status"));
+        sendCommandLine(source, infoLine("/notick status", "show current optimization status"));
+        sendCommandLine(source, infoLine("/notick here", "show current chunk diagnostics"));
+        sendCommandLine(source, infoLine("/notick help", "show this help page"));
+
+        return 1;
+    }
+
+    private static void sendCommandLine(CommandSourceStack source, Component component) {
+        source.sendSuccess(() -> component, false);
+    }
+
+    private static MutableComponent commandHeader(String title, String subtitle) {
+        return Component.literal("NoTick ").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD)
+                .append(Component.literal(title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
+                .append(Component.literal(" - " + subtitle).withStyle(ChatFormatting.GRAY));
+    }
+
+    private static MutableComponent labeledLine(String label, Component value) {
+        return Component.literal("- ").withStyle(ChatFormatting.DARK_GRAY)
+                .append(Component.literal(label + ": ").withStyle(ChatFormatting.GRAY))
+                .append(value);
+    }
+
+    private static MutableComponent infoLine(String commandOrLabel, String description) {
+        return Component.literal("- ").withStyle(ChatFormatting.DARK_GRAY)
+                .append(Component.literal(commandOrLabel).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal(" - " + description).withStyle(ChatFormatting.GRAY));
+    }
+
+    private static MutableComponent enabledDisabledComponent(boolean value) {
+        return Component.literal(value ? "Enabled" : "Disabled")
+                .withStyle(value ? ChatFormatting.GREEN : ChatFormatting.RED);
+    }
+
+    private static MutableComponent yesNoComponent(boolean value) {
+        return Component.literal(value ? "Yes" : "No")
+                .withStyle(value ? ChatFormatting.GREEN : ChatFormatting.RED);
+    }
+
+    private static MutableComponent integrationLine() {
+        return Component.empty()
+                .append(Component.literal("FTB Chunks ").withStyle(ChatFormatting.GRAY))
+                .append(yesNoComponent(FTB_CLAIM_PROVIDER != null))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("OPAC ").withStyle(ChatFormatting.GRAY))
+                .append(yesNoComponent(OPAC_CLAIM_PROVIDER != null))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("External CAT ").withStyle(ChatFormatting.GRAY))
+                .append(yesNoComponent(ChunkActivityTrackerCompat.isExternalAvailable()));
     }
 
     public static boolean isTickable(@NotNull Entity entity) {
