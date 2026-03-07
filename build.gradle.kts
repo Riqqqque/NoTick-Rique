@@ -18,8 +18,16 @@ blahaj {
 
 afterEvaluate {
 	val setupChiseledBuild = tasks.findByName("setupChiseledBuild") ?: return@afterEvaluate
-	val syncRootUploadJars = (rootProject.tasks.findByName("syncRootUploadJars") as? org.gradle.api.tasks.Copy)
-		?: rootProject.tasks.create("syncRootUploadJars", org.gradle.api.tasks.Copy::class.java).apply {
+	val resourceExcludes = when {
+		name.endsWith("-fabric") -> listOf("META-INF/mods.toml", "META-INF/neoforge.mods.toml")
+		name.endsWith("-neoforge") -> listOf("fabric.mod.json", "META-INF/mods.toml")
+		name.endsWith("-forge") -> listOf("fabric.mod.json", "META-INF/neoforge.mods.toml")
+		else -> emptyList()
+	}
+	val syncRootUploadJars = if (rootProject.tasks.names.contains("syncRootUploadJars")) {
+		rootProject.tasks.named("syncRootUploadJars", org.gradle.api.tasks.Copy::class.java)
+	} else {
+		rootProject.tasks.register("syncRootUploadJars", org.gradle.api.tasks.Copy::class.java) {
 			into(rootProject.layout.buildDirectory.dir("libs"))
 			doFirst {
 				delete(
@@ -29,6 +37,7 @@ afterEvaluate {
 				)
 			}
 		}
+	}
 	val syncChiseledJava = tasks.register<org.gradle.api.tasks.Sync>("syncChiseledJava") {
 		dependsOn(setupChiseledBuild)
 		from(layout.buildDirectory.dir("chiseledSrc/main/java"))
@@ -36,14 +45,18 @@ afterEvaluate {
 	}
 	val syncChiseledResources = tasks.register<org.gradle.api.tasks.Sync>("syncChiseledResources") {
 		dependsOn(setupChiseledBuild)
-		from(layout.buildDirectory.dir("chiseledSrc/main/resources"))
+		from(layout.buildDirectory.dir("chiseledSrc/main/resources")) {
+			exclude(resourceExcludes)
+		}
 		into(layout.buildDirectory.dir("generated/chiseledSrc/main/resources"))
 	}
-	syncRootUploadJars.from(layout.buildDirectory.dir("libs")) {
-		include("no_ticks-*.jar")
-		exclude("*-sources.jar")
+	syncRootUploadJars.configure {
+		from(layout.buildDirectory.dir("libs")) {
+			include("no_ticks-*.jar")
+			exclude("*-sources.jar")
+		}
 	}
-	tasks.findByName("build")?.let { syncRootUploadJars.dependsOn(it) }
+	tasks.findByName("build")?.let { syncRootUploadJars.configure { dependsOn(it) } }
 	@Suppress("UNCHECKED_CAST")
 	(extensions.findByName("sourceSets") as? org.gradle.api.tasks.SourceSetContainer)
 		?.findByName("main")
@@ -64,6 +77,9 @@ afterEvaluate {
 	}
 	tasks.findByName("compileJava")?.dependsOn(syncChiseledJava)
 	tasks.findByName("processResources")?.dependsOn(syncChiseledResources)
+	tasks.withType(org.gradle.language.jvm.tasks.ProcessResources::class.java).configureEach {
+		exclude(resourceExcludes)
+	}
 	tasks.findByName("sourcesJar")?.dependsOn(syncChiseledJava, syncChiseledResources)
 	tasks.findByName("build")?.finalizedBy(syncRootUploadJars)
 }
