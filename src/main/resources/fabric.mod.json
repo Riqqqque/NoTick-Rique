@@ -8,8 +8,8 @@
 		"${author}"
 	],
 	"contact": {
-		"sources": "https://github.com/${github}/${name}",
-		"issues": "https://github.com/${github}/${name}/issues"
+		"sources": "${github}",
+		"issues": "${github}/issues"
 	},
 	"license": "${license}",
 	"icon": "assets/${namespace}/textures/mod_logo.png",
