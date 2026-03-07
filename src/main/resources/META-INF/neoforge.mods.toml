@@ -3,7 +3,7 @@ loaderVersion="[1,)"
 license="${license}"
 showAsResourcePack=false
 
-issueTrackerURL = "https://github.com/${github}/${name}/issues"
+issueTrackerURL = "${github}/issues"
 
 [[mods]]
 modId="${id}"
@@ -12,7 +12,7 @@ displayName="${display_name}"
 authors="${author}"
 description="${description}"
 logoFile="assets/${namespace}/textures/mod_logo.png"
-displayURL = "https://github.com/${github}/${name}/"
+displayURL = "${github}"
 
 [[mixins]]
 config = "mixins.${mixinid}.json"
