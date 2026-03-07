@@ -1,3 +1,4 @@
+1.1.16 - Replaced the mod logo with the updated NoTick logo image
 1.1.15 - Added /notick reload to refresh the config from disk without restarting the server
 1.1.14 - Renamed the built jar files to NoTick for cleaner upload filenames
 1.1.13 - Fixed jar metadata so platforms can detect the correct Minecraft version and loader more reliably
