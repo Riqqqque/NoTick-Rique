@@ -1,3 +1,5 @@
+1.1.11 - Removed old unused logo images from the repository root
+1.1.10 - Updated the mod logo asset to the new NoTick logo image
 1.1.9 - Fixed loader metadata packaging so Fabric, Forge, and NeoForge jars are detected correctly by mod platforms
 1.1.7 - Fixed four-target build output collection, restored valid jars for every loader/version, kept nearby items ticking, hardened claim integration fallbacks, and cleaned up root upload jars
 1.1.6 - Multiplayer hardening pass: fixed claimed-chunk item ticking, removed duplicate aliases, OP-only `/notick`, safer optional-claim integration fallback with warnings, and branding/license cleanup
