@@ -1,3 +1,4 @@
+1.1.12 - Improved the /notick command output with cleaner status and local chunk diagnostics
 1.1.11 - Removed old unused logo images from the repository root
 1.1.10 - Updated the mod logo asset to the new NoTick logo image
 1.1.9 - Fixed loader metadata packaging so Fabric, Forge, and NeoForge jars are detected correctly by mod platforms
