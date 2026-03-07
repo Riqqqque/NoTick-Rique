@@ -1,3 +1,5 @@
+1.1.15 - Added /notick reload to refresh the config from disk without restarting the server
+1.1.14 - Renamed the built jar files to NoTick for cleaner upload filenames
 1.1.13 - Fixed jar metadata so platforms can detect the correct Minecraft version and loader more reliably
 1.1.12 - Improved the /notick command output with cleaner status and local chunk diagnostics
 1.1.11 - Removed old unused logo images from the repository root
