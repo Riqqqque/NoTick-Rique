@@ -1,3 +1,4 @@
+1.1.18 - Improved tick decision speed, made /notick reload use the real disk reload path, hardened claim integration fallback, normalized whitelist config entries, and added safer default ticking for critical vanilla transient entities
 1.1.17 - Fixed the packaged GitHub links so they point to the current NoTick repository
 1.1.16 - Replaced the mod logo with the updated NoTick logo image
 1.1.15 - Added /notick reload to refresh the config from disk without restarting the server

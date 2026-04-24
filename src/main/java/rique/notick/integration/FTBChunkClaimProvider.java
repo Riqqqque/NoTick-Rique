@@ -103,7 +103,7 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
             Class<?> chunkDimPosType = Class.forName(CHUNK_DIM_POS_CLASS);
             chunkDimPosConstructor = chunkDimPosType.getConstructor(Level.class, BlockPos.class);
             available = true;
-        } catch (ReflectiveOperationException exception) {
+        } catch (ReflectiveOperationException | LinkageError exception) {
             available = false;
             warnFailure("Unable to bind FTB Chunks API via reflection", exception);
         }
