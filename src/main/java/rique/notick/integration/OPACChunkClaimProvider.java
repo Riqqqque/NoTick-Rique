@@ -79,7 +79,7 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
             Class<?> serverApiClass = Class.forName(SERVER_API_CLASS);
             getServerApiMethod = serverApiClass.getMethod("get", MinecraftServer.class);
             available = true;
-        } catch (ReflectiveOperationException exception) {
+        } catch (ReflectiveOperationException | LinkageError exception) {
             available = false;
             warnFailure("Unable to bind OPAC API via reflection", exception);
         }

@@ -33,12 +33,15 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -150,6 +153,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         List<? extends String> entityModIdList = ObjectArrayList.wrap(new String[]{"create", "witherstormmod"});
         List<? extends String> entityWhiteList = ObjectArrayList.wrap(new String[]{
                 "minecraft:ender_dragon", "minecraft:ghast", "minecraft:wither", "minecraft:player",
+                "minecraft:tnt", "minecraft:end_crystal", "minecraft:area_effect_cloud", "minecraft:evoker_fangs",
+                "minecraft:arrow", "minecraft:spectral_arrow", "minecraft:trident", "minecraft:firework_rocket",
+                "minecraft:egg", "minecraft:snowball", "minecraft:llama_spit", "minecraft:eye_of_ender",
+                "minecraft:ender_pearl", "minecraft:potion", "minecraft:experience_bottle",
+                "minecraft:lightning_bolt", "minecraft:tnt_minecart",
+                "minecraft:fireball", "minecraft:small_fireball", "minecraft:dragon_fireball", "minecraft:wither_skull",
+                "minecraft:shulker_bullet", "minecraft:wind_charge", "minecraft:breeze_wind_charge",
                 "alexsmobs:void_worm", "alexsmobs:void_worm_part", "alexsmobs:spectre",
                 "twilightforest:naga", "twilightforest:lich", "twilightforest:yeti", "twilightforest:snow_queen", "twilightforest:minoshroom", "twilightforest:hydra", "twilightforest:knight_phantom", "twilightforest:ur_ghast",
                 "atum:pharaoh",
@@ -375,18 +385,66 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         ModConfig commonConfig = findLegacyCommonConfig();
         if (commonConfig == null) return 0;
 
-        commonConfig.acceptSyncedConfig(Files.readAllBytes(commonConfig.getFullPath()));
+        reloadLegacyCommonConfig(commonConfig);
         reloadedConfigs++;
         #else
         for (ModConfig modConfig : ModConfigs.getModConfigs(MOD_ID)) {
             if (modConfig.getType() != ModConfig.Type.COMMON) continue;
 
-            ConfigTracker.acceptSyncedConfig(modConfig, Files.readAllBytes(modConfig.getFullPath()));
+            reloadModernCommonConfig(modConfig);
             reloadedConfigs++;
         }
         #endif
 
         return reloadedConfigs;
+    }
+
+    #if current_20_1
+    private static void reloadLegacyCommonConfig(ModConfig config) throws Exception {
+        Path configBasePath = config.getFullPath().getParent();
+        Method closeConfig = ConfigTracker.class.getDeclaredMethod("closeConfig", ModConfig.class, Path.class);
+        Method openConfig = ConfigTracker.class.getDeclaredMethod("openConfig", ModConfig.class, Path.class);
+        closeConfig.setAccessible(true);
+        openConfig.setAccessible(true);
+        invokeConfigTracker(closeConfig, ConfigTracker.INSTANCE, config, configBasePath);
+        invokeConfigTracker(openConfig, ConfigTracker.INSTANCE, config, configBasePath);
+    }
+    #else
+    private static void reloadModernCommonConfig(ModConfig config) throws Exception {
+        Path configBasePath = config.getFullPath().getParent();
+        Method closeConfig = findModernCloseConfigMethod();
+        Method openConfig = ConfigTracker.class.getDeclaredMethod("openConfig", ModConfig.class, Path.class, Path.class);
+        openConfig.setAccessible(true);
+        invokeConfigTracker(closeConfig, null, config);
+        invokeConfigTracker(openConfig, null, config, configBasePath, null);
+    }
+
+    private static Method findModernCloseConfigMethod() throws NoSuchMethodException {
+        try {
+            Method method = ConfigTracker.class.getDeclaredMethod("unloadConfig", ModConfig.class);
+            method.setAccessible(true);
+            return method;
+        } catch (NoSuchMethodException ignored) {
+            Method method = ConfigTracker.class.getDeclaredMethod("closeConfig", ModConfig.class);
+            method.setAccessible(true);
+            return method;
+        }
+    }
+    #endif
+
+    private static void invokeConfigTracker(Method method, Object target, Object... args) throws Exception {
+        try {
+            method.invoke(target, args);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof Exception checked) {
+                throw checked;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw exception;
+        }
     }
 
     #if current_20_1
@@ -414,16 +472,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             return true;
 
         Level level = entity.level();
-        if (!isOptimizableDim(level))
-            return true;
-
         if (DISABLE_ON_CLIENT.get() && level.isClientSide)
             return true;
 
-        if (entity instanceof FallingBlockEntity)
+        if (!isOptimizableDim(level))
             return true;
 
-        if (DISABLE_IN_ACTIVE_CHUNKS.get() && isInOrNearActiveChunk(level, entity.chunkPosition()))
+        if (entity instanceof FallingBlockEntity)
             return true;
 
         if (entity instanceof LivingEntity) {
@@ -440,6 +495,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
         EntityType<?> entityType = entity.getType();
         if (((Tickable.EntityType) entityType).notick$shouldAlwaysTick())
+            return true;
+
+        if (DISABLE_IN_ACTIVE_CHUNKS.get() && isInOrNearActiveChunk(level, entity.chunkPosition()))
             return true;
 
         BlockPos entityPos = entity.blockPosition();
@@ -479,9 +537,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static boolean isInClaimedChunk(Level level, BlockPos pos) {
-        ChunkPos chunkPos = new ChunkPos(pos);
+        if (FTB_CLAIM_PROVIDER == null && OPAC_CLAIM_PROVIDER == null) return false;
+
         ChunkBoolCache cache = getChunkCache(CLAIMED_CHUNK_CACHE, level);
-        long key = ChunkPos.asLong(chunkPos.x, chunkPos.z);
+        long key = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
         byte state = cache.get(key);
         if (state != UNKNOWN) return state == TRUE;
 
@@ -534,7 +593,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 byte state = cache.get(key);
 
                 if (state == UNKNOWN) {
-                    long secondsInChunk = ChunkActivityTrackerCompat.getTotalTimeInChunk(level, new ChunkPos(chunkX, chunkZ));
+                    long secondsInChunk = ChunkActivityTrackerCompat.getTotalTimeInChunk(level, chunkX, chunkZ);
                     state = secondsInChunk > thresholdSeconds ? TRUE : FALSE;
                     cache.put(key, state == TRUE);
                 }
@@ -678,8 +737,11 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             initialized = true;
             HashSet<String> rebuilt = new HashSet<>(source.size());
             for (String entry : source) {
-                if (entry != null && !entry.isBlank()) {
-                    rebuilt.add(entry);
+                if (entry != null) {
+                    String normalized = entry.trim();
+                    if (!normalized.isEmpty()) {
+                        rebuilt.add(normalized.toLowerCase(Locale.ROOT));
+                    }
                 }
             }
             cached = rebuilt;
@@ -775,20 +837,20 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         private static final MethodHandle GET_TOTAL_TIME_IN_CHUNK = resolve();
         private static boolean warnedExternalTrackerFailure;
 
-        private static long getTotalTimeInChunk(Level level, ChunkPos chunkPos) {
+        private static long getTotalTimeInChunk(Level level, int chunkX, int chunkZ) {
             MethodHandle handle = GET_TOTAL_TIME_IN_CHUNK;
             if (handle == null) {
-                return InternalChunkActivityTracker.getTotalTimeInChunk(level, chunkPos);
+                return InternalChunkActivityTracker.getTotalTimeInChunk(level, ChunkPos.asLong(chunkX, chunkZ));
             }
 
             try {
-                return (long) handle.invoke(level, chunkPos);
+                return (long) handle.invoke(level, new ChunkPos(chunkX, chunkZ));
             } catch (Throwable throwable) {
                 if (!warnedExternalTrackerFailure) {
                     warnedExternalTrackerFailure = true;
                     LOGGER.warn("[NoTick] External Chunk Activity Tracker call failed; falling back to internal tracker.", throwable);
                 }
-                return InternalChunkActivityTracker.getTotalTimeInChunk(level, chunkPos);
+                return InternalChunkActivityTracker.getTotalTimeInChunk(level, ChunkPos.asLong(chunkX, chunkZ));
             }
         }
 
@@ -820,11 +882,11 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         private static final long FORGET_AFTER_TICKS = 20L * 60L * 30L;
         private static final Map<Level, LevelState> STATES = new WeakHashMap<>();
 
-        private static long getTotalTimeInChunk(Level level, ChunkPos chunkPos) {
+        private static long getTotalTimeInChunk(Level level, long chunkKey) {
             if (level.isClientSide) return 0L;
             LevelState state = getState(level);
             state.refresh(level);
-            return state.getSeconds(chunkPos);
+            return state.getSeconds(chunkKey);
         }
 
         private static void clear() {
@@ -878,8 +940,8 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 }
             }
 
-            private long getSeconds(ChunkPos chunkPos) {
-                return secondsByChunk.get(ChunkPos.asLong(chunkPos.x, chunkPos.z));
+            private long getSeconds(long chunkKey) {
+                return secondsByChunk.get(chunkKey);
             }
 
             private void cleanup(long now) {
