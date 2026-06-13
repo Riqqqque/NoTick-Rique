@@ -1,3 +1,7 @@
+1.1.22 - Fixed resource pack metadata for 1.21.1 builds
+1.1.21 - Improved player range cache setup, cleaned up project metadata, and refreshed the README command notes
+1.1.20 - Improved nearby entity tick checks so active chunk and claim lookups are skipped when entities are already in player range
+1.1.19 - Fixed item entity ticking when item optimization is disabled, protected more transient vanilla entities, and hardened claim integration failure handling
 1.1.18 - Improved tick decision speed, made /notick reload use the real disk reload path, hardened claim integration fallback, normalized whitelist config entries, and added safer default ticking for critical vanilla transient entities
 1.1.17 - Fixed the packaged GitHub links so they point to the current NoTick repository
 1.1.16 - Replaced the mod logo with the updated NoTick logo image

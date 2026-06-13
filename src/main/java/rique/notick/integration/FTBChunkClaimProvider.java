@@ -65,7 +65,7 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
 
             Object chunkPosKey = chunkDimPosConstructor.newInstance(level, pos);
             return claimedChunks.containsKey(chunkPosKey);
-        } catch (ReflectiveOperationException | ClassCastException exception) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
             disable("FTB Chunks claim lookup failed", exception);
             return true;
         }

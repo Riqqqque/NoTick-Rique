@@ -158,6 +158,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 "minecraft:egg", "minecraft:snowball", "minecraft:llama_spit", "minecraft:eye_of_ender",
                 "minecraft:ender_pearl", "minecraft:potion", "minecraft:experience_bottle",
                 "minecraft:lightning_bolt", "minecraft:tnt_minecart",
+                "minecraft:experience_orb", "minecraft:ominous_item_spawner",
                 "minecraft:fireball", "minecraft:small_fireball", "minecraft:dragon_fireball", "minecraft:wither_skull",
                 "minecraft:shulker_bullet", "minecraft:wind_charge", "minecraft:breeze_wind_charge",
                 "alexsmobs:void_worm", "alexsmobs:void_worm_part", "alexsmobs:spectre",
@@ -497,24 +498,32 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         if (((Tickable.EntityType) entityType).notick$shouldAlwaysTick())
             return true;
 
+        boolean optimizeItemEntity = false;
+        if (entity instanceof ItemEntity itemEntity) {
+            optimizeItemEntity = shouldOptimizeItemEntity(itemEntity);
+            if (!optimizeItemEntity)
+                return true;
+        }
+
+        BlockPos entityPos = entity.blockPosition();
+        boolean nearPlayer = isNearPlayer(level, entityPos);
+        if (nearPlayer)
+            return true;
+
         if (DISABLE_IN_ACTIVE_CHUNKS.get() && isInOrNearActiveChunk(level, entity.chunkPosition()))
             return true;
 
-        BlockPos entityPos = entity.blockPosition();
         if (isInClaimedChunk(level, entityPos))
             return true;
 
-        boolean nearPlayer = isNearPlayer(level, entityPos);
-
-        if (isOptimizableItemEntity(entity)) {
-            if (nearPlayer) return true;
+        if (optimizeItemEntity) {
             return ThreadLocalRandom.current().nextInt(100) < ITEM_TICK_CHANCE_PERCENT.get();
         }
 
         if (shouldTickInRaid(level, entityPos, entityType, entity))
             return true;
 
-        return nearPlayer;
+        return false;
     }
 
     private static boolean shouldTickInRaid(Level level, BlockPos blockPos, EntityType<?> entityType, Entity entity) {
@@ -525,15 +534,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         return false;
     }
 
-    private static boolean isOptimizableItemEntity(Entity entity) {
+    private static boolean shouldOptimizeItemEntity(ItemEntity entity) {
         if (!OPTIMIZE_ITEM_MOVEMENT.get()) return false;
-        if (entity instanceof ItemEntity) {
-            Item item = ((ItemEntity) entity).getItem().getItem();
-            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
-            if (itemId == null) return true;
-            return !itemWhitelist().contains(itemId.toString());
-        }
-        return false;
+
+        Item item = entity.getItem().getItem();
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
+        if (itemId == null) return true;
+        return !itemWhitelist().contains(itemId.toString());
     }
 
     private static boolean isInClaimedChunk(Level level, BlockPos pos) {
@@ -779,7 +786,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
         private void refresh(Level level, int horizontalDistanceBlocks) {
             long now = level.getGameTime();
-            int nextChunkRadius = (int) Math.ceil(horizontalDistanceBlocks / 16.0D);
+            int nextChunkRadius = (horizontalDistanceBlocks + 15) >> 4;
             if (now == gameTime && nextChunkRadius == chunkRadius) return;
 
             gameTime = now;
@@ -789,6 +796,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
             for (Player player : level.players()) {
                 players.add(player);
+            }
+
+            if (players.size() <= 4 || nextChunkRadius > 16) {
+                return;
+            }
+
+            for (Player player : players) {
                 ChunkPos chunkPos = player.chunkPosition();
                 long key = ChunkPos.asLong(chunkPos.x, chunkPos.z);
                 ObjectArrayList<Player> bucket = playersByChunk.get(key);
