@@ -65,7 +65,7 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
             ResourceLocation dimension = level.dimension().location();
             Object claim = claimMethod.invoke(claimsManager, dimension, new ChunkPos(pos));
             return claim != null;
-        } catch (ReflectiveOperationException | ClassCastException exception) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
             disable("OPAC claim lookup failed", exception);
             return true;
         }

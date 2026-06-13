@@ -22,6 +22,11 @@ afterEvaluate {
 	val loader = name.substringAfterLast("-")
 	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
 	val artifactBaseName = "${rootProject.name}-$loader"
+	val resourcePackFormat = when (minecraftVersion) {
+		"1.20.1" -> 15
+		"1.21.1" -> 34
+		else -> 15
+	}
 	val neoForgeVersionLine = if (loader == "neoforge") {
 		val versionParts = minecraftVersion.split(".")
 		val neoForgeLine = if (versionParts.size >= 3) {
@@ -113,6 +118,16 @@ side="BOTH"
 					fabricModJson.readText().replace(
 						Regex("""("minecraft"\s*:\s*")[^"]+(")"""),
 						"""$1$minecraftVersion$2"""
+					)
+				)
+			}
+
+			val packMcmeta = resourcesDir.resolve("pack.mcmeta")
+			if (packMcmeta.exists()) {
+				packMcmeta.writeText(
+					packMcmeta.readText().replace(
+						Regex(""""pack_format"\s*:\s*\d+"""),
+						""""pack_format": $resourcePackFormat"""
 					)
 				)
 			}
