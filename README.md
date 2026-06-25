@@ -14,9 +14,9 @@ Because this is an invasive optimization, NoTick includes extensive configuratio
 
 Commands require operator permission level 2.
 
-- `/notick` or `/notick status` shows the current optimization status.
-- `/notick here` shows diagnostics for your current chunk.
-- `/notick reload` reloads the NoTick config from disk.
+- `/notick` or `/notick status` shows what optimization is doing, the safe player range, active chunk protection, and claim integration status.
+- `/notick here` explains the current dimension/chunk protections and whether distant entities there can be skipped.
+- `/notick reload` reloads the NoTick config from disk and clears runtime caches.
 - `/notick help` lists available commands.
 
 ## Supported Builds

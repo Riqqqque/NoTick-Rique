@@ -244,26 +244,40 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static int executeStatusCommand(CommandSourceStack source) {
-        sendCommandLine(source, commandHeader("Status", "Current optimization settings"));
-        sendCommandLine(source, labeledLine("Entity ticking optimization", enabledDisabledComponent(OPTIMIZE_ENTITIES_TICKING.get())));
-        sendCommandLine(source, labeledLine("Item ticking optimization",
+        sendCommandLine(source, commandHeader("Status", "Server tick optimization"));
+        sendCommandLine(source, stateLine("Entity optimization",
+                enabledDisabledComponent(OPTIMIZE_ENTITIES_TICKING.get()),
+                OPTIMIZE_ENTITIES_TICKING.get()
+                        ? "distant, unprotected entities can be skipped"
+                        : "all entities tick normally"));
+        sendCommandLine(source, stateLine("Distant item optimization",
                 enabledDisabledComponent(OPTIMIZE_ITEM_MOVEMENT.get())
-                        .append(Component.literal(" (" + ITEM_TICK_CHANCE_PERCENT.get() + "% distant item tick chance)").withStyle(ChatFormatting.DARK_GRAY))));
-        sendCommandLine(source, labeledLine("Player range",
-                Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " vertical")
-                        .withStyle(ChatFormatting.AQUA)));
-        sendCommandLine(source, labeledLine("Active chunk protection",
+                        .append(Component.literal(" (" + ITEM_TICK_CHANCE_PERCENT.get() + "% chance)").withStyle(ChatFormatting.DARK_GRAY)),
+                OPTIMIZE_ITEM_MOVEMENT.get()
+                        ? "only applies outside player/protected ranges"
+                        : "dropped items tick normally"));
+        sendCommandLine(source, stateLine("Player safe range",
+                Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " blocks horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " blocks vertical")
+                        .withStyle(ChatFormatting.AQUA),
+                "entities inside this range always tick"));
+        sendCommandLine(source, stateLine("Active chunk protection",
                 enabledDisabledComponent(DISABLE_IN_ACTIVE_CHUNKS.get())
-                        .append(Component.literal(" (radius " + ACTIVE_CHUNK_RADIUS.get() + ", threshold " + ACTIVE_CHUNK_SECONDS_THRESHOLD.get() + "s)").withStyle(ChatFormatting.DARK_GRAY))));
-        sendCommandLine(source, labeledLine("Integrations", integrationLine()));
-        sendCommandLine(source, infoLine("/notick here", "show current chunk diagnostics"));
-        sendCommandLine(source, infoLine("/notick reload", "reload the config from disk"));
-        sendCommandLine(source, infoLine("/notick help", "show command help"));
+                        .append(Component.literal(" (radius " + ACTIVE_CHUNK_RADIUS.get() + ", " + ACTIVE_CHUNK_SECONDS_THRESHOLD.get() + "s)").withStyle(ChatFormatting.DARK_GRAY)),
+                DISABLE_IN_ACTIVE_CHUNKS.get()
+                        ? "recently used chunks stay active"
+                        : "recent activity is ignored"));
+        sendCommandLine(source, stateLine(
+                "Claim integrations",
+                integrationLine(),
+                "claimed chunks stay active when supported"));
+        sendCommandLine(source, infoLine(
+                "Next checks",
+                "/notick here for this chunk, /notick reload after config edits"));
 
         if (source.getEntity() instanceof Player) {
-            sendCommandLine(source, infoLine("Tip", "Run /notick here for local chunk checks"));
+            sendCommandLine(source, infoLine("Tip", "stand near a farm and run /notick here to see why it is protected"));
         } else {
-            sendCommandLine(source, infoLine("Tip", "Run /notick here as a player for local chunk checks"));
+            sendCommandLine(source, infoLine("Tip", "run /notick here in-game for local chunk protection checks"));
         }
 
         return 1;
@@ -285,14 +299,26 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         boolean activeChunk = isInOrNearActiveChunk(level, chunk);
 
         sendCommandLine(source, commandHeader("Here", "Current chunk diagnostics"));
-        sendCommandLine(source, labeledLine("Dimension", Component.literal(level.dimension().location().toString()).withStyle(ChatFormatting.AQUA)));
-        sendCommandLine(source, labeledLine("Chunk", Component.literal(chunk.x + ", " + chunk.z).withStyle(ChatFormatting.AQUA)));
-        sendCommandLine(source, labeledLine("Optimization applies in this dimension", yesNoComponent(optimizableDimension)));
-        sendCommandLine(source, labeledLine("Claimed chunk protection", yesNoComponent(claimedChunk)));
-        sendCommandLine(source, labeledLine("Active chunk protection", yesNoComponent(activeChunk)));
-        sendCommandLine(source, labeledLine("Nearby player range",
+        sendCommandLine(source, stateLine("Location",
+                Component.literal(level.dimension().location() + " / chunk " + chunk.x + ", " + chunk.z).withStyle(ChatFormatting.AQUA),
+                "your current server position"));
+        sendCommandLine(source, stateLine(
+                "Dimension optimization",
+                enabledDisabledComponent(optimizableDimension),
+                dimensionStatusText(optimizableDimension)));
+        sendCommandLine(source, stateLine(
+                "Claim protection",
+                yesNoComponent(claimedChunk),
+                protectionText(claimedChunk, "claimed chunks force normal ticking")));
+        sendCommandLine(source, stateLine(
+                "Active chunk protection",
+                yesNoComponent(activeChunk),
+                protectionText(activeChunk, "recent player activity keeps this area active")));
+        sendCommandLine(source, stateLine("Nearby player range",
                 Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " vertical")
-                        .withStyle(ChatFormatting.AQUA)));
+                        .withStyle(ChatFormatting.AQUA),
+                "entities near players always tick"));
+        sendCommandLine(source, infoLine("Result", hereResultText(optimizableDimension, claimedChunk, activeChunk)));
 
         return 1;
     }
@@ -314,13 +340,15 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         try {
             int reloadedConfigs = reloadCommonConfigs();
             if (reloadedConfigs <= 0) {
-                sendCommandLine(source, infoLine("Unavailable", "No loaded common config was found"));
+                sendCommandLine(source, infoLine("Unavailable", "No loaded NoTick common config was found"));
                 return 0;
             }
 
             clearCaches();
-            sendCommandLine(source, labeledLine("Reloaded configs", Component.literal(String.valueOf(reloadedConfigs)).withStyle(ChatFormatting.GREEN)));
-            sendCommandLine(source, infoLine("Result", "Config values and caches were refreshed"));
+            sendCommandLine(source, stateLine("Reloaded config files",
+                    Component.literal(String.valueOf(reloadedConfigs)).withStyle(ChatFormatting.GREEN),
+                    "disk config values were re-read"));
+            sendCommandLine(source, infoLine("Result", "runtime caches were cleared and rebuilt on the next tick check"));
             return 1;
         } catch (Exception exception) {
             LOGGER.error("Failed to reload NoTick config from disk", exception);
@@ -351,6 +379,11 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 .append(value);
     }
 
+    private static MutableComponent stateLine(String label, Component value, String explanation) {
+        return labeledLine(label, value)
+                .append(Component.literal(" - " + explanation).withStyle(ChatFormatting.DARK_GRAY));
+    }
+
     private static MutableComponent infoLine(String commandOrLabel, String description) {
         return Component.literal("- ").withStyle(ChatFormatting.DARK_GRAY)
                 .append(Component.literal(commandOrLabel).withStyle(ChatFormatting.YELLOW))
@@ -377,6 +410,26 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("External CAT ").withStyle(ChatFormatting.GRAY))
                 .append(yesNoComponent(ChunkActivityTrackerCompat.isExternalAvailable()));
+    }
+
+    private static String dimensionStatusText(boolean optimizableDimension) {
+        return optimizableDimension
+                ? "NoTick can optimize distant entities in this dimension"
+                : "this dimension is excluded by config";
+    }
+
+    private static String protectionText(boolean protectedHere, String protectedMessage) {
+        return protectedHere ? protectedMessage : "not protecting this chunk right now";
+    }
+
+    private static String hereResultText(boolean optimizableDimension, boolean claimedChunk, boolean activeChunk) {
+        if (!optimizableDimension) {
+            return "entities in this dimension tick normally";
+        }
+        if (claimedChunk || activeChunk) {
+            return "this chunk is protected from distant tick skipping";
+        }
+        return "when no player is nearby, distant non-whitelisted entities here can be skipped";
     }
 
     private static int reloadCommonConfigs() throws Exception {
