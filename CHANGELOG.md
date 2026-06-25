@@ -1,3 +1,4 @@
+1.1.24 - Added a dedicated NeoForge 26.1.2 build for ATM11 using Java 25 and ModDevGradle
 1.1.23 - Improved /notick command output with clearer status, local chunk diagnostics, and reload results
 1.1.22 - Fixed resource pack metadata for 1.21.1 builds
 1.1.21 - Improved player range cache setup, cleaned up project metadata, and refreshed the README command notes

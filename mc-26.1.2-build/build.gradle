@@ -1,0 +1,57 @@
+plugins {
+    id "base"
+}
+
+def noTickProps = new Properties()
+file("../gradle.properties").withInputStream { noTickProps.load(it) }
+ext.noTickProps = noTickProps
+
+allprojects {
+    version = noTickProps.getProperty("mod.version")
+    group = noTickProps.getProperty("mod.group")
+
+    repositories {
+        mavenCentral()
+        maven {
+            name = "NeoForged"
+            url = "https://maven.neoforged.net/releases/"
+        }
+    }
+}
+
+subprojects {
+    apply plugin: "java"
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(25)
+        withSourcesJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 25
+        options.encoding = "UTF-8"
+    }
+}
+
+def releaseJarName = "NoTick-neoforge-${project.version}-${project.property("minecraft_2612")}.jar"
+def rootLibsDir = layout.projectDirectory.dir("../build/libs")
+
+tasks.register("collectModrinthJars", Copy) {
+    dependsOn(subprojects.collect { it.tasks.named("build") })
+
+    from(subprojects.collect { it.layout.buildDirectory.dir("libs") }) {
+        include releaseJarName
+    }
+
+    into(rootLibsDir)
+
+    doFirst {
+        delete(fileTree(rootLibsDir.asFile) {
+            include "NoTick-neoforge-*-${project.property("minecraft_2612")}.jar"
+        })
+    }
+}
+
+tasks.register("buildAll") {
+    dependsOn(tasks.named("collectModrinthJars"))
+}

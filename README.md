@@ -25,6 +25,7 @@ Commands require operator permission level 2.
 - Forge 1.20.1
 - Fabric 1.21.1
 - NeoForge 1.21.1
+- NeoForge 26.1.2
 
 ## Notes for Packs
 
