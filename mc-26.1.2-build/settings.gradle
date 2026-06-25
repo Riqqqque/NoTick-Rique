@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            name = "NeoForged"
+            url = "https://maven.neoforged.net/releases/"
+        }
+        mavenCentral()
+    }
+}
+
+rootProject.name = "NoTick-26.1.2"
+
+include("neoforge-26.1.2")
+project(":neoforge-26.1.2").projectDir = file("../neoforge-26.1.2")
