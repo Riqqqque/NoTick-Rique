@@ -1,3 +1,4 @@
+1.1.23 - Improved /notick command output with clearer status, local chunk diagnostics, and reload results
 1.1.22 - Fixed resource pack metadata for 1.21.1 builds
 1.1.21 - Improved player range cache setup, cleaned up project metadata, and refreshed the README command notes
 1.1.20 - Improved nearby entity tick checks so active chunk and claim lookups are skipped when entities are already in player range
