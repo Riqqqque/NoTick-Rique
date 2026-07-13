@@ -1,6 +1,5 @@
 package rique.notick;
 
-import com.google.common.base.Predicates;
 import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -114,6 +113,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     private static final byte UNKNOWN = -1;
     private static final byte FALSE = 0;
     private static final byte TRUE = 1;
+    private static volatile int whitelistRevision;
 
     private static final boolean IS_FTB_CHUNKS_PRESENT =
             #if fabric
@@ -177,16 +177,42 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
         Builder builder = new Builder();
         builder.comment("NoTick").push("Living Entities Tick Settings");
-        OPTIMIZE_ENTITIES_TICKING = builder.comment("If you disable this, entities will not stop ticking when they'are far from you, this mod may be useless for you too").define("OptimizeEntitiesTicking", true);
+        OPTIMIZE_ENTITIES_TICKING = builder.comment("When enabled, distant entities can stop ticking when no safety rule requires them to remain active.").define("OptimizeEntitiesTicking", true);
         LIVING_HORIZONTAL_TICK_DIST = builder.defineInRange("LivingEntitiesMaxHorizontalTickDistance", 64, 1, Integer.MAX_VALUE);
         LIVING_VERTICAL_TICK_DIST = builder.defineInRange("LivingEntitiesMaxVerticalTickDistance", 32, 1, Integer.MAX_VALUE);
-        ENTITIES_WHITELIST = builder.comment("If you don't want an entity to be affected by the optimization, you can write its registry name down here.").defineList("EntitiesWhitelist", entityWhiteList, Predicates.alwaysTrue());
-        ENTITIES_MOD_ID_WHITELIST = builder.comment("If you don't want entities of a mod to be affected by the optimization, you can write its modid down here").defineList("EntitiesModIDWhiteList", entityModIdList, Predicates.alwaysTrue());
-        TICKING_RAIDER_ENTITIES_IN_RAID = builder.comment("With this turned on, all the raider won't stop ticking in raid chunks even if they are far from players (well this is not perfect as the raiders may walk out of the raid range)").define("TickRaidersInRaid", true);
-        RAID_ENTITIES_WHITELIST = builder.comment("Similar with entity whitelist, but only take effect in raid.").defineList("RaidEntitiesWhiteList", ObjectArrayList.wrap(new String[]{"minecraft:witch", "minecraft:vex"}), Predicates.alwaysTrue());
-        RAID_ENTITIES_MOD_ID_LIST = builder.comment("Similar with entity modID whitelist, but only take effect in raid").defineList("RaidEntitiesModIDWhiteList", new ObjectArrayList<>(), Predicates.alwaysTrue());
-        DIMENSION_WHITELIST = builder.comment("Leave this empty for applying to all the dimensions", "Entities in these dimensions will be affected by the optimization").defineList("DimensionWhitelist", new ObjectArrayList<>(), Predicates.alwaysTrue());
-        IGNORE_DEAD_ENTITIES = builder.comment("If this is enabled, tickable check will run a lot faster, but the entity will not die out of range").define("IgnoreDeadEntities", false);
+        ENTITIES_WHITELIST = builder.comment("Entity IDs that must always tick. Leave empty to disable this whitelist.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("EntitiesWhitelist", entityWhiteList, () -> "minecraft:pig", NoTick::isStringConfigValue);
+                #else
+                .defineList("EntitiesWhitelist", entityWhiteList, NoTick::isStringConfigValue);
+                #endif
+        ENTITIES_MOD_ID_WHITELIST = builder.comment("Mod IDs whose entities must always tick. Leave empty to disable this whitelist.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("EntitiesModIDWhiteList", entityModIdList, () -> "minecraft", NoTick::isStringConfigValue);
+                #else
+                .defineList("EntitiesModIDWhiteList", entityModIdList, NoTick::isStringConfigValue);
+                #endif
+        TICKING_RAIDER_ENTITIES_IN_RAID = builder.comment("Keep raiders ticking while they are inside an active raid.").define("TickRaidersInRaid", true);
+        List<? extends String> raidEntityWhitelist = ObjectArrayList.wrap(new String[]{"minecraft:witch", "minecraft:vex"});
+        RAID_ENTITIES_WHITELIST = builder.comment("Additional entity IDs that must tick while inside an active raid.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("RaidEntitiesWhiteList", raidEntityWhitelist, () -> "minecraft:witch", NoTick::isStringConfigValue);
+                #else
+                .defineList("RaidEntitiesWhiteList", raidEntityWhitelist, NoTick::isStringConfigValue);
+                #endif
+        RAID_ENTITIES_MOD_ID_LIST = builder.comment("Mod IDs whose entities must tick while inside an active raid.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("RaidEntitiesModIDWhiteList", new ObjectArrayList<>(), () -> "minecraft", NoTick::isStringConfigValue);
+                #else
+                .defineList("RaidEntitiesModIDWhiteList", new ObjectArrayList<>(), NoTick::isStringConfigValue);
+                #endif
+        DIMENSION_WHITELIST = builder.comment("Dimensions where optimization is allowed. Leave empty to allow every dimension.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("DimensionWhitelist", new ObjectArrayList<>(), () -> "minecraft:overworld", NoTick::isStringConfigValue);
+                #else
+                .defineList("DimensionWhitelist", new ObjectArrayList<>(), NoTick::isStringConfigValue);
+                #endif
+        IGNORE_DEAD_ENTITIES = builder.comment("Allow dead entities outside protected areas to be skipped. This can delay their removal until the area becomes active again.").define("IgnoreDeadEntities", false);
         IGNORE_HOSTILE_ENTITIES = builder.comment("If this is enabled, this mod will only work on passive entities.").define("IgnoreHostileEntities", false);
         IGNORE_PASSIVE_ENTITIES = builder.comment("If this is enabled, this mod will only work on hostile entities.").define("IgnorePassiveEntities", false);
         ACTIVE_CHUNK_RADIUS = builder.comment("Radius in chunks used for active chunk protection checks. 2 means a 5x5 area around each entity chunk.").defineInRange("ActiveChunkRadius", 2, 0, 16);
@@ -195,7 +221,12 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         builder.push("Item Entities Tick Settings");
         OPTIMIZE_ITEM_MOVEMENT = builder.comment("Apply probabilistic ticking to non-whitelisted item entities outside player range.").define("OptimizeItemMovement", false);
         ITEM_TICK_CHANCE_PERCENT = builder.comment("Tick chance for non-whitelisted item entities when item optimization is enabled. 75 means items tick on 75% of game ticks.").defineInRange("ItemTickChancePercent", 75, 1, 100);
-        ITEMS_WHITELIST = builder.comment("If you don't want to let a specific item entity in the world to be effected by the optimization, you can write its registry name down here.", "Require 'OptimizeItemMovement' to be true").defineList("ItemWhiteList", itemList, Predicates.alwaysTrue());
+        ITEMS_WHITELIST = builder.comment("Item IDs that must always tick when item optimization is enabled. Leave empty to disable this whitelist.")
+                #if AFTER_21_1
+                .defineListAllowEmpty("ItemWhiteList", itemList, () -> "minecraft:cobblestone", NoTick::isStringConfigValue);
+                #else
+                .defineList("ItemWhiteList", itemList, NoTick::isStringConfigValue);
+                #endif
         builder.pop();
         builder.push("Misc");
         DISABLE_ON_CLIENT = builder.define("DisableOnClient", true);
@@ -203,6 +234,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         DISABLE_IN_ACTIVE_CHUNKS = builder.comment("If you disable this, entities near player bases may be affected.").define("DisableInActiveChunks", true);
         builder.pop();
         COMMON_CONFIG = builder.build();
+    }
+
+    private static boolean isStringConfigValue(Object value) {
+        return value instanceof String;
     }
 
     public NoTick(#if NEO IEventBus modEventBus, ModContainer modContainer #endif) {
@@ -551,6 +586,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         if (((Tickable.EntityType) entityType).notick$shouldAlwaysTick())
             return true;
 
+        if (hasAlwaysTickingPassenger(entity))
+            return true;
+
         boolean optimizeItemEntity = false;
         if (entity instanceof ItemEntity itemEntity) {
             optimizeItemEntity = shouldOptimizeItemEntity(itemEntity);
@@ -570,7 +608,8 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             return true;
 
         if (optimizeItemEntity) {
-            return ThreadLocalRandom.current().nextInt(100) < ITEM_TICK_CHANCE_PERCENT.get();
+            int tickChance = ITEM_TICK_CHANCE_PERCENT.get();
+            return tickChance >= 100 || ThreadLocalRandom.current().nextInt(100) < tickChance;
         }
 
         if (shouldTickInRaid(level, entityPos, entityType, entity))
@@ -580,9 +619,21 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static boolean shouldTickInRaid(Level level, BlockPos blockPos, EntityType<?> entityType, Entity entity) {
-        if (level instanceof ServerLevel && ((ServerLevel) level).isRaided(blockPos)) {
-            if (entity instanceof Raider) return TICKING_RAIDER_ENTITIES_IN_RAID.get();
-            return ((Tickable.EntityType)entityType).notick$shouldAlwaysTickInRaid();
+        if (!(level instanceof ServerLevel serverLevel)) return false;
+
+        boolean affectedByRaidRules = entity instanceof Raider
+                ? TICKING_RAIDER_ENTITIES_IN_RAID.get()
+                : ((Tickable.EntityType) entityType).notick$shouldAlwaysTickInRaid();
+        return affectedByRaidRules && serverLevel.isRaided(blockPos);
+    }
+
+    private static boolean hasAlwaysTickingPassenger(Entity entity) {
+        for (Entity passenger : entity.getPassengers()) {
+            if (passenger instanceof Player
+                    || ((Tickable.EntityType) passenger.getType()).notick$shouldAlwaysTick()
+                    || hasAlwaysTickingPassenger(passenger)) {
+                return true;
+            }
         }
         return false;
     }
@@ -640,6 +691,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         return raidEntityWhitelist().contains(id.toString()) || raidEntityModWhitelist().contains(id.getNamespace());
     }
 
+    public static int getWhitelistRevision() {
+        return whitelistRevision;
+    }
+
     private static boolean isInOrNearActiveChunk(Level level, ChunkPos center) {
         ChunkBoolCache cache = getChunkCache(ACTIVE_CHUNK_CACHE, level);
         int radius = ACTIVE_CHUNK_RADIUS.get();
@@ -654,7 +709,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
                 if (state == UNKNOWN) {
                     long secondsInChunk = ChunkActivityTrackerCompat.getTotalTimeInChunk(level, chunkX, chunkZ);
-                    state = secondsInChunk > thresholdSeconds ? TRUE : FALSE;
+                    state = secondsInChunk >= thresholdSeconds ? TRUE : FALSE;
                     cache.put(key, state == TRUE);
                 }
 
@@ -720,6 +775,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static void clearCaches() {
+        whitelistRevision++;
         ENTITIES_WHITELIST_CACHE.clear();
         ENTITIES_MOD_WHITELIST_CACHE.clear();
         RAID_ENTITIES_WHITELIST_CACHE.clear();
@@ -839,7 +895,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
         private void refresh(Level level, int horizontalDistanceBlocks) {
             long now = level.getGameTime();
-            int nextChunkRadius = (horizontalDistanceBlocks + 15) >> 4;
+            int nextChunkRadius = horizontalDistanceBlocks > 256
+                    ? 17
+                    : (horizontalDistanceBlocks + 15) >> 4;
             if (now == gameTime && nextChunkRadius == chunkRadius) return;
 
             gameTime = now;
@@ -996,7 +1054,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 if (now % TICKS_PER_SECOND == 0L) {
                     for (Player player : level.players()) {
                         long key = ChunkPos.asLong(player.chunkPosition().x, player.chunkPosition().z);
-                        secondsByChunk.put(key, secondsByChunk.get(key) + 1);
+                        int seconds = secondsByChunk.get(key);
+                        if (seconds < Integer.MAX_VALUE) {
+                            secondsByChunk.put(key, seconds + 1);
+                        }
                         lastSeenTickByChunk.put(key, now);
                     }
                 }

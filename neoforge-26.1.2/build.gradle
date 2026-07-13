@@ -9,7 +9,8 @@ def generatedResourceDir = layout.buildDirectory.dir("generated/notick26/resourc
 def noTickProps = rootProject.ext.noTickProps
 def minecraftVersion = rootProject.property("minecraft_2612")
 def neoForgeVersion = rootProject.property("neoforge_2612")
-def releaseJarName = "NoTick-neoforge-${project.version}-${minecraftVersion}.jar"
+def modVersion = project.version.toString()
+def releaseJarName = "NoTick-neoforge-${modVersion}-${minecraftVersion}.jar"
 
 base {
     archivesName = "NoTick-neoforge"
@@ -93,6 +94,7 @@ neoForge {
 
 tasks.named("compileJava") {
     dependsOn(tasks.named("preprocessNoTickJava"))
+    options.compilerArgs.addAll(["-Xlint:deprecation", "-Xlint:unchecked"])
 }
 
 tasks.named("processResources") {
@@ -106,7 +108,55 @@ tasks.named("jar", Jar) {
 tasks.named("sourcesJar", Jar) {
     dependsOn(tasks.named("preprocessNoTickJava"), tasks.named("syncNoTickResources"))
     archiveClassifier = "sources"
-    archiveFileName = "NoTick-neoforge-${project.version}-${minecraftVersion}-sources.jar"
+    archiveFileName = "NoTick-neoforge-${modVersion}-${minecraftVersion}-sources.jar"
+}
+
+tasks.register("verifyReleaseJar") {
+    dependsOn(tasks.named("jar"))
+    inputs.file(tasks.named("jar", Jar).flatMap { it.archiveFile })
+
+    doLast {
+        def jarFile = tasks.named("jar", Jar).get().archiveFile.get().asFile
+        def requiredEntries = [
+                "META-INF/neoforge.mods.toml",
+                "mixins.no_ticks.json",
+                "pack.mcmeta",
+                "rique/notick/NoTick.class"
+        ]
+        def forbiddenEntries = [
+                "fabric.mod.json",
+                "META-INF/mods.toml",
+                "no_ticks.accesswidener"
+        ]
+
+        new java.util.zip.ZipFile(jarFile).withCloseable { zip ->
+            requiredEntries.each { entry ->
+                if (zip.getEntry(entry) == null) {
+                    throw new GradleException("Release jar is missing ${entry}")
+                }
+            }
+            forbiddenEntries.each { entry ->
+                if (zip.getEntry(entry) != null) {
+                    throw new GradleException("Release jar contains loader metadata from another build: ${entry}")
+                }
+            }
+
+            def metadata = zip.getInputStream(zip.getEntry("META-INF/neoforge.mods.toml")).getText("UTF-8")
+            [
+                    "modId=\"${noTickProps.getProperty('mod.id')}\"",
+                    "version=\"${modVersion}\"",
+                    "versionRange=\"[${minecraftVersion}]\""
+            ].each { expected ->
+                if (!metadata.contains(expected)) {
+                    throw new GradleException("Release metadata is missing ${expected}")
+                }
+            }
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("verifyReleaseJar"))
 }
 
 def preprocessJava(List<String> lines) {
