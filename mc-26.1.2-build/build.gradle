@@ -33,7 +33,8 @@ subprojects {
     }
 }
 
-def releaseJarName = "NoTick-neoforge-${project.version}-${project.property("minecraft_2612")}.jar"
+def minecraftVersion = property("minecraft_2612").toString()
+def releaseJarName = "NoTick-neoforge-${project.version}-${minecraftVersion}.jar"
 def rootLibsDir = layout.projectDirectory.dir("../build/libs")
 
 tasks.register("collectModrinthJars", Copy) {
@@ -47,7 +48,7 @@ tasks.register("collectModrinthJars", Copy) {
 
     doFirst {
         delete(fileTree(rootLibsDir.asFile) {
-            include "NoTick-neoforge-*-${project.property("minecraft_2612")}.jar"
+            include "NoTick-*.jar"
         })
     }
 }
