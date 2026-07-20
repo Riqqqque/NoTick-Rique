@@ -1,3 +1,4 @@
+1.1.26 - Added NeoForge 26.2 support, refreshed loader dependencies, strengthened jar checks, and hardened cross-version entity whitelist handling
 1.1.25 - Fixed FTB Chunks claim protection on 26.1.2, made empty or malformed config lists safe, kept whitelisted passengers ticking, and reduced hot-path whitelist and raid overhead
 1.1.24 - Added a dedicated NeoForge 26.1.2 build for ATM11 using Java 25 and ModDevGradle
 1.1.23 - Improved /notick command output with clearer status, local chunk diagnostics, and reload results

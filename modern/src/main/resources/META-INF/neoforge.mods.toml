@@ -1,7 +1,4 @@
-modLoader="javafml"
-loaderVersion="[1,)"
 license="${mod_license}"
-showAsResourcePack=false
 issueTrackerURL="${mod_github}/issues"
 
 [[mixins]]
@@ -19,7 +16,7 @@ logoFile="assets/${mod_namespace}/textures/mod_logo.png"
 [[dependencies.${mod_id}]]
 modId="neoforge"
 type="required"
-versionRange="[26.1.2,)"
+versionRange="[${neoforge_min_version},)"
 ordering="NONE"
 side="BOTH"
 

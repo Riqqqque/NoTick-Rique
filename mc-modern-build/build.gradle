@@ -1,0 +1,95 @@
+plugins {
+    id "base"
+}
+
+def noTickProps = new Properties()
+file("../gradle.properties").withInputStream { noTickProps.load(it) }
+ext.noTickProps = noTickProps
+
+allprojects {
+    version = noTickProps.getProperty("mod.version")
+    group = noTickProps.getProperty("mod.group")
+
+    repositories {
+        mavenCentral()
+        maven {
+            name = "NeoForged"
+            url = "https://maven.neoforged.net/releases/"
+        }
+    }
+}
+
+subprojects {
+    apply plugin: "java"
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(25)
+        withSourcesJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 25
+        options.encoding = "UTF-8"
+    }
+}
+
+def rootLibsDir = layout.projectDirectory.dir("../build/libs")
+def releaseJarPattern = "NoTick-neoforge-${project.version}-*.jar"
+def releaseVersion = project.version.toString()
+def modernMinecraftVersions = [
+        property("minecraft_2612").toString(),
+        property("minecraft_262").toString()
+]
+def modernReleaseJarNames = modernMinecraftVersions.collect {
+    "NoTick-neoforge-${releaseVersion}-${it}.jar".toString()
+} as Set
+def preservedLegacyJarNames = [
+        "NoTick-fabric-${releaseVersion}-1.20.1.jar",
+        "NoTick-forge-${releaseVersion}-1.20.1.jar",
+        "NoTick-fabric-${releaseVersion}-1.21.1.jar",
+        "NoTick-neoforge-${releaseVersion}-1.21.1.jar"
+].collect { it.toString() } as Set
+
+tasks.register("collectModrinthJars", Copy) {
+    dependsOn(subprojects.collect { it.tasks.named("build") })
+
+    from(subprojects.collect { it.layout.buildDirectory.dir("libs") }) {
+        include releaseJarPattern
+        exclude "*-sources.jar"
+    }
+
+    into(rootLibsDir)
+
+    doFirst {
+        def staleUploadJars = fileTree(rootLibsDir.asFile) {
+            include "NoTick-*.jar"
+        }.files.findAll { !preservedLegacyJarNames.contains(it.name) }
+        delete(staleUploadJars)
+    }
+}
+
+tasks.register("verifyCollectedJars") {
+    dependsOn(tasks.named("collectModrinthJars"))
+
+    doLast {
+        def collected = fileTree(rootLibsDir.asFile) {
+            include releaseJarPattern
+            exclude "*-sources.jar"
+        }.files.findAll { modernReleaseJarNames.contains(it.name) }
+
+        if (collected.size() != modernMinecraftVersions.size()) {
+            throw new GradleException("Expected ${modernMinecraftVersions.size()} modern release jars but found ${collected.size()}: ${collected*.name}")
+        }
+
+        modernMinecraftVersions.each { minecraftVersion ->
+            def expectedName = "NoTick-neoforge-${releaseVersion}-${minecraftVersion}.jar"
+            if (!collected.any { it.name == expectedName }) {
+                throw new GradleException("Missing collected release jar ${expectedName}")
+            }
+        }
+    }
+}
+
+tasks.register("buildAll") {
+    dependsOn(tasks.named("verifyCollectedJars"))
+}

@@ -9,7 +9,10 @@ pluginManagement {
     }
 }
 
-rootProject.name = "NoTick-26.1.2"
+rootProject.name = "NoTick-modern"
 
 include("neoforge-26.1.2")
 project(":neoforge-26.1.2").projectDir = file("../neoforge-26.1.2")
+
+include("neoforge-26.2")
+project(":neoforge-26.2").projectDir = file("../neoforge-26.2")
