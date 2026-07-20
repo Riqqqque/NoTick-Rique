@@ -1,0 +1,9 @@
+plugins {
+    id "net.neoforged.moddev" version "2.0.142"
+}
+
+ext.modernMinecraftVersionProperty = "minecraft_262"
+ext.modernNeoForgeVersionProperty = "neoforge_262"
+ext.modernNeoForgeMinimumVersionProperty = "neoforge_min_262"
+
+apply from: rootProject.file("../gradle/neoforge-modern.gradle")

@@ -1,3 +1,6 @@
+import java.nio.charset.StandardCharsets
+import java.util.zip.ZipFile
+
 plugins {
 	id("toni.blahaj")
 }
@@ -22,6 +25,11 @@ afterEvaluate {
 	val loader = name.substringAfterLast("-")
 	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
 	val artifactBaseName = "${rootProject.name}-$loader"
+	val releaseVersion = findProperty("mod.version") as String
+	val preservedModernJarNames = setOf(
+		"NoTick-neoforge-$releaseVersion-26.1.2.jar",
+		"NoTick-neoforge-$releaseVersion-26.2.jar"
+	)
 	val resourcePackFormat = when (minecraftVersion) {
 		"1.20.1" -> 15
 		"1.21.1" -> 34
@@ -60,12 +68,11 @@ side="BOTH"
 		rootProject.tasks.register("syncRootUploadJars", org.gradle.api.tasks.Copy::class.java) {
 			into(rootProject.layout.buildDirectory.dir("libs"))
 			doFirst {
-				delete(
-					rootProject.fileTree(rootProject.layout.buildDirectory.dir("libs")) {
-						include("NoTick-*.jar")
-						include("no_ticks-*.jar")
-					}
-				)
+				val staleUploadJars = rootProject.fileTree(rootProject.layout.buildDirectory.dir("libs")) {
+					include("NoTick-*.jar")
+					include("no_ticks-*.jar")
+				}.files.filterNot { it.name in preservedModernJarNames }
+				delete(staleUploadJars)
 			}
 		}
 	}
@@ -160,4 +167,75 @@ side="BOTH"
 	}
 	tasks.findByName("sourcesJar")?.dependsOn(syncChiseledJava, syncChiseledResources)
 	tasks.findByName("build")?.finalizedBy(syncRootUploadJars)
+
+	val remapJarTask = tasks.named("remapJar", org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java)
+	val verifyReleaseJar = tasks.register("verifyReleaseJar") {
+		dependsOn(remapJarTask)
+		inputs.file(remapJarTask.flatMap { it.archiveFile })
+
+		doLast {
+			val jarFile = remapJarTask.get().archiveFile.get().asFile
+			if (!jarFile.isFile) {
+				throw GradleException("Release jar was not created: ${jarFile.absolutePath}")
+			}
+
+			ZipFile(jarFile).use { zip: ZipFile ->
+				val descriptor = when (loader) {
+					"fabric" -> "fabric.mod.json"
+					"forge" -> "META-INF/mods.toml"
+					"neoforge" -> "META-INF/neoforge.mods.toml"
+					else -> throw GradleException("Unsupported loader $loader")
+				}
+				val requiredEntries = mutableListOf(
+					descriptor,
+					"mixins.no_ticks.json",
+					"rique/notick/NoTick.class",
+					"assets/notick/textures/mod_logo.png",
+					"assets/notick/lang/en_us.json"
+				)
+				if (loader == "fabric") requiredEntries += "no_ticks.accesswidener"
+
+				requiredEntries.forEach { entry ->
+					if (zip.getEntry(entry) == null) {
+						throw GradleException("${jarFile.name} is missing $entry")
+					}
+				}
+
+				val forbiddenEntries = listOf(
+					"fabric.mod.json",
+					"META-INF/mods.toml",
+					"META-INF/neoforge.mods.toml"
+				).filterNot { it == descriptor }.toMutableList()
+				if (loader != "fabric") forbiddenEntries += "no_ticks.accesswidener"
+				forbiddenEntries.forEach { entry ->
+					if (zip.getEntry(entry) != null) {
+						throw GradleException("${jarFile.name} contains metadata for another loader: $entry")
+					}
+				}
+
+				val metadata = zip.getInputStream(zip.getEntry(descriptor)).bufferedReader(StandardCharsets.UTF_8).use { reader -> reader.readText() }
+				val expectedMetadata = if (loader == "fabric") {
+					listOf(
+						"\"id\": \"$modId\"",
+						"\"version\": \"$releaseVersion\"",
+						"\"minecraft\": \"$minecraftVersion\""
+					)
+				} else {
+					buildList {
+						add("modId=\"$modId\"")
+						add("version=\"$releaseVersion\"")
+						add("versionRange=\"[$minecraftVersion]\"")
+						if (loader == "neoforge") add("modId=\"neoforge\"")
+					}
+				}
+				expectedMetadata.forEach { expected ->
+					if (!metadata.contains(expected)) {
+						throw GradleException("${jarFile.name} metadata is missing $expected")
+					}
+				}
+			}
+		}
+	}
+
+	tasks.findByName("check")?.dependsOn(verifyReleaseJar)
 }
