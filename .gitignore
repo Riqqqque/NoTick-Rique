@@ -47,3 +47,4 @@ replay_*.log
 
 server_run/
 src/main/build.properties
+versions/*/src/main/build.properties
