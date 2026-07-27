@@ -71,6 +71,11 @@ public final class OPACChunkClaimProvider implements IChunkClaimProvider {
         }
     }
 
+    @Override
+    public boolean isOperational() {
+        return !disabled && ensureInitialized();
+    }
+
     private static synchronized boolean ensureInitialized() {
         if (initialized) return available;
         initialized = true;

@@ -30,6 +30,6 @@ Commands require operator permission level 2.
 
 ## Notes for Packs
 
-NoTick works without extra dependencies. FTB Chunks and Open Parties and Claims are optional integrations used to keep claimed chunks protected from tick skipping.
+Fabric builds require Fabric API. Forge and NeoForge builds have no extra required dependency mods. FTB Chunks and Open Parties and Claims are optional integrations used to keep claimed chunks protected from tick skipping.
 
 For large modpacks, whitelist important boss mobs, scripted entities, fake-player-style automation, or whole mod IDs if a mod depends on distant entities ticking normally.

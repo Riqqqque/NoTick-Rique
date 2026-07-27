@@ -5,4 +5,6 @@ import net.minecraft.world.level.Level;
 
 public interface IChunkClaimProvider {
     boolean isInClaimedChunk(Level level, BlockPos pos);
+
+    boolean isOperational();
 }
