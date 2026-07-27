@@ -2,7 +2,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipFile
 
 plugins {
-	id("toni.blahaj")
+	id("coffee.axle.blahaj")
 }
 
 blahaj {
@@ -20,7 +20,7 @@ blahaj {
 }
 
 afterEvaluate {
-	val setupChiseledBuild = tasks.findByName("setupChiseledBuild") ?: return@afterEvaluate
+	val setupChiseledBuild = tasks.findByName("setupChiseledBuild")
 	val minecraftVersion = name.substringBeforeLast("-")
 	val loader = name.substringAfterLast("-")
 	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
@@ -63,6 +63,14 @@ side="BOTH"
 	tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java).configureEach {
 		archiveBaseName.set(artifactBaseName)
 	}
+	extensions.findByType(net.fabricmc.loom.api.LoomGradleExtensionAPI::class.java)
+		?.runConfigs
+		?.matching { it.environment == "server" }
+		?.configureEach {
+			programArgs.removeIf { argument ->
+				argument.startsWith("--username") || argument.startsWith("--uuid")
+			}
+		}
 	val resourceExcludes = when {
 		name.endsWith("-fabric") -> listOf("META-INF/mods.toml", "META-INF/neoforge.mods.toml")
 		name.endsWith("-neoforge") -> listOf("fabric.mod.json", "META-INF/mods.toml")
@@ -83,17 +91,21 @@ side="BOTH"
 			}
 		}
 	}
-	val syncChiseledJava = tasks.register<org.gradle.api.tasks.Sync>("syncChiseledJava") {
-		dependsOn(setupChiseledBuild)
-		from(layout.buildDirectory.dir("chiseledSrc/main/java"))
-		into(layout.buildDirectory.dir("generated/chiseledSrc/main/java"))
-	}
-	val syncChiseledResources = tasks.register<org.gradle.api.tasks.Sync>("syncChiseledResources") {
-		dependsOn(setupChiseledBuild)
-		from(layout.buildDirectory.dir("chiseledSrc/main/resources")) {
-			exclude(resourceExcludes)
+	val syncChiseledJava = setupChiseledBuild?.let { setupTask ->
+		tasks.register<org.gradle.api.tasks.Sync>("syncChiseledJava") {
+			dependsOn(setupTask)
+			from(layout.buildDirectory.dir("chiseledSrc/main/java"))
+			into(layout.buildDirectory.dir("generated/chiseledSrc/main/java"))
 		}
-		into(layout.buildDirectory.dir("generated/chiseledSrc/main/resources"))
+	}
+	val syncChiseledResources = setupChiseledBuild?.let { setupTask ->
+		tasks.register<org.gradle.api.tasks.Sync>("syncChiseledResources") {
+			dependsOn(setupTask)
+			from(layout.buildDirectory.dir("chiseledSrc/main/resources")) {
+				exclude(resourceExcludes)
+			}
+			into(layout.buildDirectory.dir("generated/chiseledSrc/main/resources"))
+		}
 	}
 	syncRootUploadJars.configure {
 		from(layout.buildDirectory.dir("libs")) {
@@ -102,26 +114,28 @@ side="BOTH"
 		}
 	}
 	tasks.findByName("build")?.let { syncRootUploadJars.configure { dependsOn(it) } }
-	@Suppress("UNCHECKED_CAST")
-	(extensions.findByName("sourceSets") as? org.gradle.api.tasks.SourceSetContainer)
-		?.findByName("main")
-		?.apply {
-			java.setSrcDirs(emptyList<Any>())
-			java.srcDir(syncChiseledJava)
-			resources.setSrcDirs(emptyList<Any>())
-			resources.srcDir(syncChiseledResources)
+	if (syncChiseledJava != null && syncChiseledResources != null) {
+		@Suppress("UNCHECKED_CAST")
+		(extensions.findByName("sourceSets") as? org.gradle.api.tasks.SourceSetContainer)
+			?.findByName("main")
+			?.apply {
+				java.setSrcDirs(emptyList<Any>())
+				java.srcDir(syncChiseledJava)
+				resources.setSrcDirs(emptyList<Any>())
+				resources.srcDir(syncChiseledResources)
+			}
+		listOf(
+			"jar",
+			"sourcesJar",
+			"build",
+			"remapJar",
+			"remapSourcesJar"
+		).forEach { taskName ->
+			tasks.findByName(taskName)?.dependsOn(setupChiseledBuild)
 		}
-	listOf(
-		"jar",
-		"sourcesJar",
-		"build",
-		"remapJar",
-		"remapSourcesJar"
-	).forEach { taskName ->
-		tasks.findByName(taskName)?.dependsOn(setupChiseledBuild)
+		tasks.findByName("compileJava")?.dependsOn(syncChiseledJava)
+		tasks.findByName("processResources")?.dependsOn(syncChiseledResources)
 	}
-	tasks.findByName("compileJava")?.dependsOn(syncChiseledJava)
-	tasks.findByName("processResources")?.dependsOn(syncChiseledResources)
 	tasks.withType(org.gradle.language.jvm.tasks.ProcessResources::class.java).configureEach {
 		exclude(resourceExcludes)
 		doLast {
@@ -177,7 +191,9 @@ side="BOTH"
 			}
 		}
 	}
-	tasks.findByName("sourcesJar")?.dependsOn(syncChiseledJava, syncChiseledResources)
+	if (syncChiseledJava != null && syncChiseledResources != null) {
+		tasks.findByName("sourcesJar")?.dependsOn(syncChiseledJava, syncChiseledResources)
+	}
 	tasks.findByName("build")?.finalizedBy(syncRootUploadJars)
 
 	val remapJarTask = tasks.named("remapJar", org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java)

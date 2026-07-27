@@ -1,5 +1,6 @@
 pluginManagement {
 	repositories {
+		maven("https://maven.axle.coffee/releases")
 		mavenCentral()
 		gradlePluginPortal()
 		maven("https://maven.fabricmc.net/")
@@ -8,16 +9,15 @@ pluginManagement {
 		maven("https://maven.neoforged.net/releases/")
 		maven("https://maven.kikugie.dev/snapshots")
 		maven("https://maven.kikugie.dev/releases")
-		maven("https://maven.txni.dev/releases")
 	}
 }
 
 plugins {
-	id("dev.architectury.loom") version "1.9-SNAPSHOT" apply false
-	kotlin("jvm") version "2.0.0" apply false
-	kotlin("plugin.serialization") version "2.0.0" apply false
-	id("toni.blahaj") version "2.0.8"
-	id("dev.kikugie.stonecutter") version "0.6-alpha.5"
+	id("dev.architectury.loom") version "1.14.473" apply false
+	kotlin("jvm") version "2.3.10" apply false
+	kotlin("plugin.serialization") version "2.3.10" apply false
+	id("coffee.axle.blahaj") version "3.0.1"
+	id("dev.kikugie.stonecutter") version "0.9.1"
 }
 
 blahaj {
