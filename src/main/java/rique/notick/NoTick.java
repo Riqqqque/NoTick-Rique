@@ -49,6 +49,7 @@ import java.util.concurrent.ThreadLocalRandom;
 #if FABRIC
     import net.fabricmc.api.ModInitializer;
     import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+    import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
     import net.fabricmc.loader.api.FabricLoader;
 
     #if after_21_1
@@ -265,6 +266,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     public void onInitialize() {
         #if FABRIC
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> registerCommands(dispatcher));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> sendLoginWarning(handler.player));
         #endif
     }
 
@@ -438,13 +440,23 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     private static MutableComponent integrationLine() {
         return Component.empty()
                 .append(Component.literal("FTB Chunks ").withStyle(ChatFormatting.GRAY))
-                .append(yesNoComponent(FTB_CLAIM_PROVIDER != null))
+                .append(integrationStatusComponent(FTB_CLAIM_PROVIDER))
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("OPAC ").withStyle(ChatFormatting.GRAY))
-                .append(yesNoComponent(OPAC_CLAIM_PROVIDER != null))
+                .append(integrationStatusComponent(OPAC_CLAIM_PROVIDER))
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("External CAT ").withStyle(ChatFormatting.GRAY))
                 .append(yesNoComponent(ChunkActivityTrackerCompat.isExternalAvailable()));
+    }
+
+    private static MutableComponent integrationStatusComponent(@Nullable IChunkClaimProvider provider) {
+        if (provider == null) {
+            return Component.literal("Not installed").withStyle(ChatFormatting.GRAY);
+        }
+        if (provider.isOperational()) {
+            return Component.literal("Ready").withStyle(ChatFormatting.GREEN);
+        }
+        return Component.literal("Fail-safe").withStyle(ChatFormatting.YELLOW);
     }
 
     private static String dimensionStatusText(boolean optimizableDimension) {
@@ -643,7 +655,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
         Item item = entity.getItem().getItem();
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(item);
-        if (itemId == null) return true;
+        if (itemId == null) return false;
         return !itemWhitelist().contains(itemId.toString());
     }
 
@@ -825,17 +837,20 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
     #if FORGE
     private void onForgePlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (!SEND_MESSAGE.get()) return;
-        event.getEntity().displayClientMessage(Component.literal(getLoginWarningText()), false);
+        sendLoginWarning(event.getEntity());
     }
     #endif
 
     #if NEO
     private void onNeoPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
-        if (!SEND_MESSAGE.get()) return;
-        event.getEntity().displayClientMessage(Component.literal(getLoginWarningText()), false);
+        sendLoginWarning(event.getEntity());
     }
     #endif
+
+    private static void sendLoginWarning(Player player) {
+        if (!SEND_MESSAGE.get()) return;
+        player.sendSystemMessage(Component.literal(getLoginWarningText()));
+    }
 
     private static String getLoginWarningText() {
         if (IS_FTB_CHUNKS_PRESENT || IS_OPAC_PRESENT) {
@@ -888,10 +903,14 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static final class PlayerSpatialCache {
+        private static final long BUCKET_CLEANUP_INTERVAL_TICKS = 20L * 60L;
+
         private long gameTime = Long.MIN_VALUE;
+        private long lastBucketCleanupTime = Long.MIN_VALUE;
         private int chunkRadius = -1;
-        private final ObjectArrayList<Player> players = new ObjectArrayList<>();
-        private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<ObjectArrayList<Player>> playersByChunk = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+        private int playerCount;
+        private final ObjectArrayList<PlayerSnapshot> players = new ObjectArrayList<>();
+        private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<PlayerBucket> playersByChunk = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
 
         private void refresh(Level level, int horizontalDistanceBlocks) {
             long now = level.getGameTime();
@@ -900,37 +919,49 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                     : (horizontalDistanceBlocks + 15) >> 4;
             if (now == gameTime && nextChunkRadius == chunkRadius) return;
 
+            if (now < gameTime) {
+                playersByChunk.clear();
+                lastBucketCleanupTime = Long.MIN_VALUE;
+            }
             gameTime = now;
             chunkRadius = nextChunkRadius;
-            players.clear();
-            playersByChunk.clear();
-
+            playerCount = 0;
             for (Player player : level.players()) {
-                players.add(player);
+                PlayerSnapshot snapshot;
+                if (playerCount < players.size()) {
+                    snapshot = players.get(playerCount);
+                } else {
+                    snapshot = new PlayerSnapshot();
+                    players.add(snapshot);
+                }
+                snapshot.update(player);
+                playerCount++;
             }
 
-            if (players.size() <= 4 || nextChunkRadius > 16) {
+            if (playerCount <= 4 || nextChunkRadius > 16) {
+                cleanupBuckets(now);
                 return;
             }
 
-            for (Player player : players) {
-                ChunkPos chunkPos = player.chunkPosition();
-                long key = ChunkPos.asLong(chunkPos.x, chunkPos.z);
-                ObjectArrayList<Player> bucket = playersByChunk.get(key);
+            for (int index = 0; index < playerCount; index++) {
+                PlayerSnapshot player = players.get(index);
+                long key = ChunkPos.asLong(player.chunkX, player.chunkZ);
+                PlayerBucket bucket = playersByChunk.get(key);
                 if (bucket == null) {
-                    bucket = new ObjectArrayList<>();
+                    bucket = new PlayerBucket();
                     playersByChunk.put(key, bucket);
                 }
-                bucket.add(player);
+                bucket.add(now, player);
             }
+            cleanupBuckets(now);
         }
 
         private boolean isNear(int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
-            if (players.isEmpty()) return false;
+            if (playerCount == 0) return false;
 
-            if (players.size() <= 4 || chunkRadius > 16) {
-                for (Player player : players) {
-                    if (isNearPlayer(player, posX, posY, posZ, maxHeight, maxDistSquared)) return true;
+            if (playerCount <= 4 || chunkRadius > 16) {
+                for (int index = 0; index < playerCount; index++) {
+                    if (isNearPlayer(players.get(index), posX, posY, posZ, maxHeight, maxDistSquared)) return true;
                 }
                 return false;
             }
@@ -940,9 +971,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             for (int x = -chunkRadius; x <= chunkRadius; x++) {
                 for (int z = -chunkRadius; z <= chunkRadius; z++) {
                     long key = ChunkPos.asLong(chunkX + x, chunkZ + z);
-                    ObjectArrayList<Player> bucket = playersByChunk.get(key);
-                    if (bucket == null) continue;
-                    for (Player player : bucket) {
+                    PlayerBucket bucket = playersByChunk.get(key);
+                    if (bucket == null || bucket.gameTime != gameTime) continue;
+                    for (PlayerSnapshot player : bucket.players) {
                         if (isNearPlayer(player, posX, posY, posZ, maxHeight, maxDistSquared)) return true;
                     }
                 }
@@ -950,11 +981,56 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             return false;
         }
 
-        private static boolean isNearPlayer(Player player, int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
-            if (Math.abs(player.getY() - posY) > maxHeight) return false;
-            double x = player.getX() - posX;
-            double z = player.getZ() - posZ;
+        private void cleanupBuckets(long now) {
+            if (lastBucketCleanupTime != Long.MIN_VALUE
+                    && now - lastBucketCleanupTime < BUCKET_CLEANUP_INTERVAL_TICKS) {
+                return;
+            }
+
+            var iterator = playersByChunk.long2ObjectEntrySet().fastIterator();
+            while (iterator.hasNext()) {
+                PlayerBucket bucket = iterator.next().getValue();
+                if (bucket.gameTime != now) {
+                    iterator.remove();
+                }
+            }
+            lastBucketCleanupTime = now;
+        }
+
+        private static boolean isNearPlayer(PlayerSnapshot player, int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
+            if (Math.abs(player.y - posY) > maxHeight) return false;
+            double x = player.x - posX;
+            double z = player.z - posZ;
             return (x * x + z * z) <= maxDistSquared;
+        }
+    }
+
+    private static final class PlayerSnapshot {
+        private double x;
+        private double y;
+        private double z;
+        private int chunkX;
+        private int chunkZ;
+
+        private void update(Player player) {
+            x = player.getX();
+            y = player.getY();
+            z = player.getZ();
+            chunkX = ((int) Math.floor(x)) >> 4;
+            chunkZ = ((int) Math.floor(z)) >> 4;
+        }
+    }
+
+    private static final class PlayerBucket {
+        private long gameTime = Long.MIN_VALUE;
+        private final ObjectArrayList<PlayerSnapshot> players = new ObjectArrayList<>();
+
+        private void add(long now, PlayerSnapshot player) {
+            if (gameTime != now) {
+                gameTime = now;
+                players.clear();
+            }
+            players.add(player);
         }
     }
 
@@ -1048,6 +1124,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 if (now < lastProcessedTick) {
                     secondsByChunk.clear();
                     lastSeenTickByChunk.clear();
+                    lastCleanupTick = Long.MIN_VALUE;
                 }
                 lastProcessedTick = now;
 

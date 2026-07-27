@@ -26,6 +26,7 @@ afterEvaluate {
 	val modId = (findProperty("mod.id") as String?) ?: "no_ticks"
 	val artifactBaseName = "${rootProject.name}-$loader"
 	val releaseVersion = findProperty("mod.version") as String
+	val loaderDependencyVersion = (findProperty("deps.fml") as String?) ?: ""
 	val preservedModernJarNames = setOf(
 		"NoTick-neoforge-$releaseVersion-26.1.2.jar",
 		"NoTick-neoforge-$releaseVersion-26.2.jar"
@@ -35,23 +36,29 @@ afterEvaluate {
 		"1.21.1" -> 34
 		else -> 15
 	}
-	val neoForgeVersionLine = if (loader == "neoforge") {
-		val versionParts = minecraftVersion.split(".")
-		val neoForgeLine = if (versionParts.size >= 3) {
-			"[${versionParts[1]}.${versionParts[2]},)"
-		} else {
-			"[${minecraftVersion.removePrefix("1.")},)"
-		}
-		"""[[dependencies."$modId"]]
-modId="neoforge"
+	val loaderDependencyBlock = when (loader) {
+		"forge" -> """[[dependencies."$modId"]]
+modId="forge"
 mandatory=true
-versionRange="$neoForgeLine"
+versionRange="[$loaderDependencyVersion,)"
 ordering="NONE"
 side="BOTH"
 
 """
+		"neoforge" -> """[[dependencies."$modId"]]
+modId="neoforge"
+type="required"
+versionRange="[$loaderDependencyVersion,)"
+ordering="NONE"
+side="BOTH"
+
+"""
+		else -> ""
+	}
+	val javaFmlLoaderVersion = if (loader == "forge") {
+		loaderDependencyVersion.substringBefore(".")
 	} else {
-		""
+		"1"
 	}
 	tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java).configureEach {
 		archiveBaseName.set(artifactBaseName)
@@ -139,8 +146,8 @@ side="BOTH"
 				)
 			}
 
-			val tomlPattern = Regex(
-				"""(\[\[dependencies\."[^"]+"\]\]\s*modId="minecraft"\s*mandatory=true\s*versionRange=")[^"]+(")""",
+			val minecraftDependencyPattern = Regex(
+				"""(\[\[dependencies\."[^"]+"\]\]\s*modId="minecraft"\s*(?:mandatory=true|type="required")\s*versionRange=")[^"]+(")""",
 				setOf(RegexOption.DOT_MATCHES_ALL)
 			)
 			listOf(
@@ -150,14 +157,19 @@ side="BOTH"
 				if (!descriptor.exists()) return@forEach
 
 				var descriptorText = descriptor.readText().replace(
-					tomlPattern,
+					minecraftDependencyPattern,
 					"""$1[$minecraftVersion]$2"""
 				)
+				descriptorText = descriptorText.replace(
+					Regex("""loaderVersion="\[[^"]+\)""""),
+					"""loaderVersion="[$javaFmlLoaderVersion,)""""
+				)
 
-				if (descriptor.name == "neoforge.mods.toml" && neoForgeVersionLine.isNotEmpty() && !descriptorText.contains("""modId="neoforge"""")) {
+				val expectedLoaderModId = if (loader == "forge") "forge" else "neoforge"
+				if (loaderDependencyBlock.isNotEmpty() && !descriptorText.contains("""modId="$expectedLoaderModId"""")) {
 					descriptorText = descriptorText.replaceFirst(
 						Regex("""(?=\[\[dependencies\."[^"]+"\]\]\s*modId="minecraft")"""),
-						Regex.escapeReplacement(neoForgeVersionLine)
+						Regex.escapeReplacement(loaderDependencyBlock)
 					)
 				}
 
@@ -225,7 +237,15 @@ side="BOTH"
 						add("modId=\"$modId\"")
 						add("version=\"$releaseVersion\"")
 						add("versionRange=\"[$minecraftVersion]\"")
-						if (loader == "neoforge") add("modId=\"neoforge\"")
+						if (loader == "forge") {
+							add("loaderVersion=\"[$javaFmlLoaderVersion,)\"")
+							add("modId=\"forge\"")
+							add("versionRange=\"[$loaderDependencyVersion,)\"")
+						}
+						if (loader == "neoforge") {
+							add("modId=\"neoforge\"")
+							add("versionRange=\"[$loaderDependencyVersion,)\"")
+						}
 					}
 				}
 				expectedMetadata.forEach { expected ->
