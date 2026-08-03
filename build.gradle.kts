@@ -14,6 +14,14 @@ repositories {
 	}
 }
 
+repositories.withType<org.gradle.api.artifacts.repositories.MavenArtifactRepository>().configureEach {
+	if (url.host.equals("maven.terraformersmc.com", ignoreCase = true)) {
+		content {
+			excludeGroupByRegex(".*")
+		}
+	}
+}
+
 blahaj {
 	config {
 
