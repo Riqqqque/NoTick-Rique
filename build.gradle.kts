@@ -33,6 +33,10 @@ blahaj {
 			val modrinthVersion = "v$forgeConfigVersion-$minecraftVersion-Fabric"
 			val dependency = deps.add("modApi", "maven.modrinth:forge-config-api-port:$modrinthVersion")
 			deps.add("include", dependency!!)
+			(project.findProperty("deps.nightconfig") as String?)?.let { nightConfigVersion ->
+				deps.add("runtimeOnly", "com.electronwill.night-config:core:$nightConfigVersion")
+				deps.add("runtimeOnly", "com.electronwill.night-config:toml:$nightConfigVersion")
+			}
 		}
 
 		if (mod.isForge) {
