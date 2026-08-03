@@ -1,3 +1,4 @@
+1.1.29 - Fixed config reloads on Forge and Fabric 1.20.1, raid whitelist overrides, active chunk tracking accuracy, command diagnostics, and loader compatibility
 1.1.28 - Restored clean build reliability after an upstream repository outage and refreshed the Gradle toolchain
 1.1.27 - Fixed Fabric login warnings, prevented unloaded-world player cache retention, made unknown modded items fail safe, clarified integration fallback status, and refreshed NeoForge support
 1.1.26 - Added NeoForge 26.2 support, refreshed loader dependencies, strengthened jar checks, and hardened cross-version entity whitelist handling

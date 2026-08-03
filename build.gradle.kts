@@ -27,6 +27,7 @@ afterEvaluate {
 	val artifactBaseName = "${rootProject.name}-$loader"
 	val releaseVersion = findProperty("mod.version") as String
 	val loaderDependencyVersion = (findProperty("deps.fml") as String?) ?: ""
+	val loaderMinimumVersion = (findProperty("deps.fml_min") as String?) ?: loaderDependencyVersion
 	val preservedModernJarNames = setOf(
 		"NoTick-neoforge-$releaseVersion-26.1.2.jar",
 		"NoTick-neoforge-$releaseVersion-26.2.jar"
@@ -40,7 +41,7 @@ afterEvaluate {
 		"forge" -> """[[dependencies."$modId"]]
 modId="forge"
 mandatory=true
-versionRange="[$loaderDependencyVersion,)"
+versionRange="[$loaderMinimumVersion,)"
 ordering="NONE"
 side="BOTH"
 
@@ -48,7 +49,7 @@ side="BOTH"
 		"neoforge" -> """[[dependencies."$modId"]]
 modId="neoforge"
 type="required"
-versionRange="[$loaderDependencyVersion,)"
+versionRange="[$loaderMinimumVersion,)"
 ordering="NONE"
 side="BOTH"
 
@@ -56,12 +57,15 @@ side="BOTH"
 		else -> ""
 	}
 	val javaFmlLoaderVersion = if (loader == "forge") {
-		loaderDependencyVersion.substringBefore(".")
+		loaderMinimumVersion.substringBefore(".")
 	} else {
 		"1"
 	}
 	tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask::class.java).configureEach {
 		archiveBaseName.set(artifactBaseName)
+	}
+	listOf("startScripts", "distTar", "distZip", "installDist").forEach { taskName ->
+		tasks.findByName(taskName)?.enabled = false
 	}
 	extensions.findByType(net.fabricmc.loom.api.LoomGradleExtensionAPI::class.java)
 		?.runConfigs
@@ -256,11 +260,11 @@ side="BOTH"
 						if (loader == "forge") {
 							add("loaderVersion=\"[$javaFmlLoaderVersion,)\"")
 							add("modId=\"forge\"")
-							add("versionRange=\"[$loaderDependencyVersion,)\"")
+							add("versionRange=\"[$loaderMinimumVersion,)\"")
 						}
 						if (loader == "neoforge") {
 							add("modId=\"neoforge\"")
-							add("versionRange=\"[$loaderDependencyVersion,)\"")
+							add("versionRange=\"[$loaderMinimumVersion,)\"")
 						}
 					}
 				}

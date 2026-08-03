@@ -281,18 +281,28 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static int executeStatusCommand(CommandSourceStack source) {
+        boolean entityOptimizationEnabled = OPTIMIZE_ENTITIES_TICKING.get();
+        boolean itemOptimizationConfigured = OPTIMIZE_ITEM_MOVEMENT.get();
+        boolean itemOptimizationEnabled = entityOptimizationEnabled && itemOptimizationConfigured;
+        MutableComponent itemOptimizationState = enabledDisabledComponent(itemOptimizationEnabled);
+        if (itemOptimizationEnabled) {
+            itemOptimizationState.append(Component.literal(" (" + ITEM_TICK_CHANCE_PERCENT.get() + "% chance)")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        }
+
         sendCommandLine(source, commandHeader("Status", "Server tick optimization"));
         sendCommandLine(source, stateLine("Entity optimization",
-                enabledDisabledComponent(OPTIMIZE_ENTITIES_TICKING.get()),
-                OPTIMIZE_ENTITIES_TICKING.get()
+                enabledDisabledComponent(entityOptimizationEnabled),
+                entityOptimizationEnabled
                         ? "distant, unprotected entities can be skipped"
                         : "all entities tick normally"));
         sendCommandLine(source, stateLine("Distant item optimization",
-                enabledDisabledComponent(OPTIMIZE_ITEM_MOVEMENT.get())
-                        .append(Component.literal(" (" + ITEM_TICK_CHANCE_PERCENT.get() + "% chance)").withStyle(ChatFormatting.DARK_GRAY)),
-                OPTIMIZE_ITEM_MOVEMENT.get()
+                itemOptimizationState,
+                itemOptimizationEnabled
                         ? "only applies outside player/protected ranges"
-                        : "dropped items tick normally"));
+                        : itemOptimizationConfigured
+                                ? "waiting for entity optimization to be enabled"
+                                : "dropped items tick normally"));
         sendCommandLine(source, stateLine("Player safe range",
                 Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " blocks horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " blocks vertical")
                         .withStyle(ChatFormatting.AQUA),
@@ -331,17 +341,23 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         Level level = player.level();
         BlockPos pos = player.blockPosition();
         ChunkPos chunk = player.chunkPosition();
+        boolean entityOptimizationEnabled = OPTIMIZE_ENTITIES_TICKING.get();
         boolean optimizableDimension = isOptimizableDim(level);
         boolean claimedChunk = isInClaimedChunk(level, pos);
-        boolean activeChunk = isInOrNearActiveChunk(level, chunk);
+        boolean activeChunkProtectionEnabled = DISABLE_IN_ACTIVE_CHUNKS.get();
+        boolean activeChunk = activeChunkProtectionEnabled && isInOrNearActiveChunk(level, chunk);
 
         sendCommandLine(source, commandHeader("Here", "Current chunk diagnostics"));
         sendCommandLine(source, stateLine("Location",
                 Component.literal(level.dimension().location() + " / chunk " + chunk.x + ", " + chunk.z).withStyle(ChatFormatting.AQUA),
                 "your current server position"));
         sendCommandLine(source, stateLine(
-                "Dimension optimization",
-                enabledDisabledComponent(optimizableDimension),
+                "Entity optimization",
+                enabledDisabledComponent(entityOptimizationEnabled),
+                entityOptimizationEnabled ? "distant entities can be evaluated" : "all entities tick normally"));
+        sendCommandLine(source, stateLine(
+                "Dimension allowed",
+                yesNoComponent(optimizableDimension),
                 dimensionStatusText(optimizableDimension)));
         sendCommandLine(source, stateLine(
                 "Claim protection",
@@ -350,12 +366,14 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         sendCommandLine(source, stateLine(
                 "Active chunk protection",
                 yesNoComponent(activeChunk),
-                protectionText(activeChunk, "recent player activity keeps this area active")));
+                activeChunkProtectionEnabled
+                        ? protectionText(activeChunk, "recent player activity keeps this area active")
+                        : "disabled in config"));
         sendCommandLine(source, stateLine("Nearby player range",
                 Component.literal(LIVING_HORIZONTAL_TICK_DIST.get() + " horizontal / " + LIVING_VERTICAL_TICK_DIST.get() + " vertical")
                         .withStyle(ChatFormatting.AQUA),
                 "entities near players always tick"));
-        sendCommandLine(source, infoLine("Result", hereResultText(optimizableDimension, claimedChunk, activeChunk)));
+        sendCommandLine(source, infoLine("Result", hereResultText(entityOptimizationEnabled, optimizableDimension, claimedChunk, activeChunk)));
 
         return 1;
     }
@@ -461,7 +479,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
     private static String dimensionStatusText(boolean optimizableDimension) {
         return optimizableDimension
-                ? "NoTick can optimize distant entities in this dimension"
+                ? "this dimension allows optimization"
                 : "this dimension is excluded by config";
     }
 
@@ -469,7 +487,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         return protectedHere ? protectedMessage : "not protecting this chunk right now";
     }
 
-    private static String hereResultText(boolean optimizableDimension, boolean claimedChunk, boolean activeChunk) {
+    private static String hereResultText(boolean entityOptimizationEnabled, boolean optimizableDimension, boolean claimedChunk, boolean activeChunk) {
+        if (!entityOptimizationEnabled) {
+            return "entity optimization is disabled; all entities tick normally";
+        }
         if (!optimizableDimension) {
             return "entities in this dimension tick normally";
         }
@@ -502,13 +523,21 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
 
     #if current_20_1
     private static void reloadLegacyCommonConfig(ModConfig config) throws Exception {
-        Path configBasePath = config.getFullPath().getParent();
-        Method closeConfig = ConfigTracker.class.getDeclaredMethod("closeConfig", ModConfig.class, Path.class);
-        Method openConfig = ConfigTracker.class.getDeclaredMethod("openConfig", ModConfig.class, Path.class);
-        closeConfig.setAccessible(true);
-        openConfig.setAccessible(true);
-        invokeConfigTracker(closeConfig, ConfigTracker.INSTANCE, config, configBasePath);
-        invokeConfigTracker(openConfig, ConfigTracker.INSTANCE, config, configBasePath);
+        var configData = config.getConfigData();
+        if (configData == null) {
+            throw new IllegalStateException("NoTick common config is not loaded");
+        }
+
+        Method load = Class.forName("com.electronwill.nightconfig.core.file.FileConfig").getMethod("load");
+        invokeConfigTracker(load, configData);
+
+        var spec = config.getSpec();
+        if (!spec.isCorrect(configData)) {
+            LOGGER.warn("[NoTick] Correcting invalid values in {}", config.getFullPath());
+            spec.correct(configData);
+            config.save();
+        }
+        spec.afterReload();
     }
     #else
     private static void reloadModernCommonConfig(ModConfig config) throws Exception {
@@ -566,8 +595,12 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     #endif
 
     public static boolean isTickable(@NotNull Entity entity) {
-        if (entity instanceof Player)
+        if (entity instanceof Player player) {
+            if (OPTIMIZE_ENTITIES_TICKING.get() && DISABLE_IN_ACTIVE_CHUNKS.get()) {
+                ChunkActivityTrackerCompat.recordPlayerActivity(player);
+            }
             return true;
+        }
 
         if (!OPTIMIZE_ENTITIES_TICKING.get())
             return true;
@@ -633,9 +666,8 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     private static boolean shouldTickInRaid(Level level, BlockPos blockPos, EntityType<?> entityType, Entity entity) {
         if (!(level instanceof ServerLevel serverLevel)) return false;
 
-        boolean affectedByRaidRules = entity instanceof Raider
-                ? TICKING_RAIDER_ENTITIES_IN_RAID.get()
-                : ((Tickable.EntityType) entityType).notick$shouldAlwaysTickInRaid();
+        boolean affectedByRaidRules = (entity instanceof Raider && TICKING_RAIDER_ENTITIES_IN_RAID.get())
+                || ((Tickable.EntityType) entityType).notick$shouldAlwaysTickInRaid();
         return affectedByRaidRules && serverLevel.isRaided(blockPos);
     }
 
@@ -1063,6 +1095,10 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             return GET_TOTAL_TIME_IN_CHUNK != null;
         }
 
+        private static void recordPlayerActivity(Player player) {
+            InternalChunkActivityTracker.recordPlayerActivity(player);
+        }
+
         private static MethodHandle resolve() {
             try {
                 Class<?> clazz = Class.forName("toni.chunkactivitytracker.ChunkActivityTracker");
@@ -1086,8 +1122,14 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         private static long getTotalTimeInChunk(Level level, long chunkKey) {
             if (level.isClientSide) return 0L;
             LevelState state = getState(level);
-            state.refresh(level);
+            state.observeTime(level.getGameTime());
             return state.getSeconds(chunkKey);
+        }
+
+        private static void recordPlayerActivity(Player player) {
+            Level level = player.level();
+            if (level.isClientSide) return;
+            getState(level).recordPlayer(player, level.getGameTime());
         }
 
         private static void clear() {
@@ -1108,7 +1150,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         }
 
         private static final class LevelState {
-            private long lastProcessedTick = Long.MIN_VALUE;
+            private long lastObservedTick = Long.MIN_VALUE;
             private long lastCleanupTick = Long.MIN_VALUE;
             private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap secondsByChunk = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
             private final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap lastSeenTickByChunk = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
@@ -1118,31 +1160,32 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 lastSeenTickByChunk.defaultReturnValue(Long.MIN_VALUE);
             }
 
-            private void refresh(Level level) {
-                long now = level.getGameTime();
-                if (now == lastProcessedTick) return;
-                if (now < lastProcessedTick) {
+            private void observeTime(long now) {
+                if (now < lastObservedTick) {
                     secondsByChunk.clear();
                     lastSeenTickByChunk.clear();
                     lastCleanupTick = Long.MIN_VALUE;
                 }
-                lastProcessedTick = now;
-
-                if (now % TICKS_PER_SECOND == 0L) {
-                    for (Player player : level.players()) {
-                        long key = ChunkPos.asLong(player.chunkPosition().x, player.chunkPosition().z);
-                        int seconds = secondsByChunk.get(key);
-                        if (seconds < Integer.MAX_VALUE) {
-                            secondsByChunk.put(key, seconds + 1);
-                        }
-                        lastSeenTickByChunk.put(key, now);
-                    }
-                }
+                lastObservedTick = now;
 
                 if (lastCleanupTick == Long.MIN_VALUE || now - lastCleanupTick >= CLEANUP_INTERVAL_TICKS) {
                     cleanup(now);
                     lastCleanupTick = now;
                 }
+            }
+
+            private void recordPlayer(Player player, long now) {
+                observeTime(now);
+                if (now % TICKS_PER_SECOND != 0L) return;
+
+                long key = ChunkPos.asLong(player.chunkPosition().x, player.chunkPosition().z);
+                if (lastSeenTickByChunk.get(key) == now) return;
+
+                int seconds = secondsByChunk.get(key);
+                if (seconds < Integer.MAX_VALUE) {
+                    secondsByChunk.put(key, seconds + 1);
+                }
+                lastSeenTickByChunk.put(key, now);
             }
 
             private long getSeconds(long chunkKey) {
