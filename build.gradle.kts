@@ -14,25 +14,18 @@ repositories {
 	}
 }
 
-if (name.endsWith("-fabric")) {
-	val minecraftVersion = name.substringBeforeLast("-")
-	val forgeConfigVersion = findProperty("deps.forgeconfigapi") as String
-	val modrinthVersion = "v$forgeConfigVersion-$minecraftVersion-Fabric"
-	configurations.configureEach {
-		resolutionStrategy.dependencySubstitution {
-			substitute(module("fuzs.forgeconfigapiport:forgeconfigapiport-fabric"))
-				.using(module("maven.modrinth:forge-config-api-port:$modrinthVersion"))
-				.because("the upstream project publishes the same release on Modrinth Maven")
-		}
-	}
-}
-
 blahaj {
 	config {
 
 	}
 	setup {
-		forgeConfig()
+		if (mod.isFabric) {
+			val minecraftVersion = project.name.substringBeforeLast("-")
+			val forgeConfigVersion = project.findProperty("deps.forgeconfigapi") as String
+			val modrinthVersion = "v$forgeConfigVersion-$minecraftVersion-Fabric"
+			val dependency = deps.add("modApi", "maven.modrinth:forge-config-api-port:$modrinthVersion")
+			deps.add("include", dependency!!)
+		}
 
 		if (mod.isForge) {
 			deps.compileOnly(deps.annotationProcessor("io.github.llamalad7:mixinextras-common:0.4.1")!!)
