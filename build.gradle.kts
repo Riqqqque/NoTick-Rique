@@ -5,6 +5,28 @@ plugins {
 	id("coffee.axle.blahaj")
 }
 
+repositories {
+	maven("https://api.modrinth.com/maven") {
+		name = "Modrinth"
+		content {
+			includeGroup("maven.modrinth")
+		}
+	}
+}
+
+if (name.endsWith("-fabric")) {
+	val minecraftVersion = name.substringBeforeLast("-")
+	val forgeConfigVersion = findProperty("deps.forgeconfigapi") as String
+	val modrinthVersion = "v$forgeConfigVersion-$minecraftVersion-Fabric"
+	configurations.configureEach {
+		resolutionStrategy.dependencySubstitution {
+			substitute(module("fuzs.forgeconfigapiport:forgeconfigapiport-fabric"))
+				.using(module("maven.modrinth:forge-config-api-port:$modrinthVersion"))
+				.because("the upstream project publishes the same release on Modrinth Maven")
+		}
+	}
+}
+
 blahaj {
 	config {
 
