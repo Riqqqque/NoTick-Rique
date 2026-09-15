@@ -16,6 +16,9 @@ base {
 
 dependencies {
     compileOnly "org.jetbrains:annotations:24.1.0"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.12.2"
+    testImplementation "it.unimi.dsi:fastutil:8.5.15"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 tasks.register("preprocessNoTickJava") {
@@ -69,6 +72,13 @@ sourceSets {
         java.setSrcDirs([generatedJavaDir])
         resources.setSrcDirs([generatedResourceDir])
     }
+    test {
+        java.srcDir "../src/test/java"
+    }
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
 }
 
 neoForge {

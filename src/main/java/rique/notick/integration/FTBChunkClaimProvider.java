@@ -29,6 +29,7 @@ public final class FTBChunkClaimProvider implements IChunkClaimProvider {
     @Override
     public boolean isInClaimedChunk(Level level, BlockPos pos) {
         if (disabled) return true;
+        if (level.isClientSide) return false;
         if (!ensureInitialized()) {
             warnFailure("Failed to initialize FTB Chunks integration", null);
             return true;
