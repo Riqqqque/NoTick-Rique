@@ -38,9 +38,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -111,9 +109,6 @@ import java.util.concurrent.ThreadLocalRandom;
 public class NoTick #if FABRIC implements ModInitializer #endif{
     public static final String MOD_ID = "no_ticks";
     private static final Logger LOGGER = LoggerFactory.getLogger(NoTick.class);
-    private static final byte UNKNOWN = -1;
-    private static final byte FALSE = 0;
-    private static final byte TRUE = 1;
     private static volatile int whitelistRevision;
 
     private static final boolean IS_FTB_CHUNKS_PRESENT =
@@ -697,7 +692,7 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         ChunkBoolCache cache = getChunkCache(CLAIMED_CHUNK_CACHE, level);
         long key = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
         byte state = cache.get(key);
-        if (state != UNKNOWN) return state == TRUE;
+        if (state != ChunkBoolCache.UNKNOWN) return state == ChunkBoolCache.TRUE;
 
         boolean flag = false;
         if (FTB_CLAIM_PROVIDER != null)
@@ -723,7 +718,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         int maxHeight = LIVING_VERTICAL_TICK_DIST.get();
         int maxDistance = LIVING_HORIZONTAL_TICK_DIST.get();
         long maxDistSquared = (long) maxDistance * maxDistance;
-        PlayerSpatialCache playerSpatialCache = getPlayerSpatialCache(level, maxDistance);
+        PlayerSpatialCache playerSpatialCache = getPlayerSpatialCache(level);
+        if (playerSpatialCache.beginRefresh(level.getGameTime(), maxDistance)) {
+            for (Player player : level.players()) {
+                playerSpatialCache.addPlayer(player.getX(), player.getY(), player.getZ());
+            }
+            playerSpatialCache.finishRefresh();
+        }
         return playerSpatialCache.isNear(posX, posY, posZ, maxHeight, maxDistSquared);
     }
 
@@ -751,13 +752,13 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 long key = ChunkPos.asLong(chunkX, chunkZ);
                 byte state = cache.get(key);
 
-                if (state == UNKNOWN) {
+                if (state == ChunkBoolCache.UNKNOWN) {
                     long secondsInChunk = ChunkActivityTrackerCompat.getTotalTimeInChunk(level, chunkX, chunkZ);
-                    state = secondsInChunk >= thresholdSeconds ? TRUE : FALSE;
-                    cache.put(key, state == TRUE);
+                    state = secondsInChunk >= thresholdSeconds ? ChunkBoolCache.TRUE : ChunkBoolCache.FALSE;
+                    cache.put(key, state == ChunkBoolCache.TRUE);
                 }
 
-                if (state == TRUE) return true;
+                if (state == ChunkBoolCache.TRUE) return true;
             }
         }
 
@@ -772,24 +773,18 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
                 cacheByLevel.put(level, cache);
             }
 
-            long gameTime = level.getGameTime();
-            if (cache.gameTime != gameTime) {
-                cache.gameTime = gameTime;
-                cache.cache.clear();
-            }
-
+            cache.ensureGameTime(level.getGameTime());
             return cache;
         }
     }
 
-    private static PlayerSpatialCache getPlayerSpatialCache(Level level, int horizontalDistanceBlocks) {
+    private static PlayerSpatialCache getPlayerSpatialCache(Level level) {
         synchronized (PLAYER_SPATIAL_CACHE) {
             PlayerSpatialCache cache = PLAYER_SPATIAL_CACHE.get(level);
             if (cache == null) {
                 cache = new PlayerSpatialCache();
                 PLAYER_SPATIAL_CACHE.put(level, cache);
             }
-            cache.refresh(level, horizontalDistanceBlocks);
             return cache;
         }
     }
@@ -891,181 +886,6 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         return "NoTick is installed but no supported chunk-claim mod is present. If your mob farm stops working from far away, install FTB Chunks / OPAC and claim its chunks. You can disable this message in NoTick config.";
     }
 
-    private static final class StringSetCache {
-        private boolean initialized;
-        private Set<String> cached = Set.of();
-
-        private synchronized Set<String> get(List<? extends String> source) {
-            if (initialized) return cached;
-            initialized = true;
-            HashSet<String> rebuilt = new HashSet<>(source.size());
-            for (String entry : source) {
-                if (entry != null) {
-                    String normalized = entry.trim();
-                    if (!normalized.isEmpty()) {
-                        rebuilt.add(normalized.toLowerCase(Locale.ROOT));
-                    }
-                }
-            }
-            cached = rebuilt;
-            return cached;
-        }
-
-        private synchronized void clear() {
-            initialized = false;
-            cached = Set.of();
-        }
-    }
-
-    private static final class ChunkBoolCache {
-        private long gameTime = Long.MIN_VALUE;
-        private final it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap cache = new it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap();
-
-        private ChunkBoolCache() {
-            cache.defaultReturnValue(UNKNOWN);
-        }
-
-        private byte get(long key) {
-            return cache.get(key);
-        }
-
-        private void put(long key, boolean value) {
-            cache.put(key, value ? TRUE : FALSE);
-        }
-    }
-
-    private static final class PlayerSpatialCache {
-        private static final long BUCKET_CLEANUP_INTERVAL_TICKS = 20L * 60L;
-
-        private long gameTime = Long.MIN_VALUE;
-        private long lastBucketCleanupTime = Long.MIN_VALUE;
-        private int chunkRadius = -1;
-        private int playerCount;
-        private final ObjectArrayList<PlayerSnapshot> players = new ObjectArrayList<>();
-        private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<PlayerBucket> playersByChunk = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
-
-        private void refresh(Level level, int horizontalDistanceBlocks) {
-            long now = level.getGameTime();
-            int nextChunkRadius = horizontalDistanceBlocks > 256
-                    ? 17
-                    : (horizontalDistanceBlocks + 15) >> 4;
-            if (now == gameTime && nextChunkRadius == chunkRadius) return;
-
-            if (now < gameTime) {
-                playersByChunk.clear();
-                lastBucketCleanupTime = Long.MIN_VALUE;
-            }
-            gameTime = now;
-            chunkRadius = nextChunkRadius;
-            playerCount = 0;
-            for (Player player : level.players()) {
-                PlayerSnapshot snapshot;
-                if (playerCount < players.size()) {
-                    snapshot = players.get(playerCount);
-                } else {
-                    snapshot = new PlayerSnapshot();
-                    players.add(snapshot);
-                }
-                snapshot.update(player);
-                playerCount++;
-            }
-
-            if (playerCount <= 4 || nextChunkRadius > 16) {
-                cleanupBuckets(now);
-                return;
-            }
-
-            for (int index = 0; index < playerCount; index++) {
-                PlayerSnapshot player = players.get(index);
-                long key = ChunkPos.asLong(player.chunkX, player.chunkZ);
-                PlayerBucket bucket = playersByChunk.get(key);
-                if (bucket == null) {
-                    bucket = new PlayerBucket();
-                    playersByChunk.put(key, bucket);
-                }
-                bucket.add(now, player);
-            }
-            cleanupBuckets(now);
-        }
-
-        private boolean isNear(int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
-            if (playerCount == 0) return false;
-
-            if (playerCount <= 4 || chunkRadius > 16) {
-                for (int index = 0; index < playerCount; index++) {
-                    if (isNearPlayer(players.get(index), posX, posY, posZ, maxHeight, maxDistSquared)) return true;
-                }
-                return false;
-            }
-
-            int chunkX = posX >> 4;
-            int chunkZ = posZ >> 4;
-            for (int x = -chunkRadius; x <= chunkRadius; x++) {
-                for (int z = -chunkRadius; z <= chunkRadius; z++) {
-                    long key = ChunkPos.asLong(chunkX + x, chunkZ + z);
-                    PlayerBucket bucket = playersByChunk.get(key);
-                    if (bucket == null || bucket.gameTime != gameTime) continue;
-                    for (PlayerSnapshot player : bucket.players) {
-                        if (isNearPlayer(player, posX, posY, posZ, maxHeight, maxDistSquared)) return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        private void cleanupBuckets(long now) {
-            if (lastBucketCleanupTime != Long.MIN_VALUE
-                    && now - lastBucketCleanupTime < BUCKET_CLEANUP_INTERVAL_TICKS) {
-                return;
-            }
-
-            var iterator = playersByChunk.long2ObjectEntrySet().fastIterator();
-            while (iterator.hasNext()) {
-                PlayerBucket bucket = iterator.next().getValue();
-                if (bucket.gameTime != now) {
-                    iterator.remove();
-                }
-            }
-            lastBucketCleanupTime = now;
-        }
-
-        private static boolean isNearPlayer(PlayerSnapshot player, int posX, int posY, int posZ, int maxHeight, long maxDistSquared) {
-            if (Math.abs(player.y - posY) > maxHeight) return false;
-            double x = player.x - posX;
-            double z = player.z - posZ;
-            return (x * x + z * z) <= maxDistSquared;
-        }
-    }
-
-    private static final class PlayerSnapshot {
-        private double x;
-        private double y;
-        private double z;
-        private int chunkX;
-        private int chunkZ;
-
-        private void update(Player player) {
-            x = player.getX();
-            y = player.getY();
-            z = player.getZ();
-            chunkX = ((int) Math.floor(x)) >> 4;
-            chunkZ = ((int) Math.floor(z)) >> 4;
-        }
-    }
-
-    private static final class PlayerBucket {
-        private long gameTime = Long.MIN_VALUE;
-        private final ObjectArrayList<PlayerSnapshot> players = new ObjectArrayList<>();
-
-        private void add(long now, PlayerSnapshot player) {
-            if (gameTime != now) {
-                gameTime = now;
-                players.clear();
-            }
-            players.add(player);
-        }
-    }
-
     private static final class ChunkActivityTrackerCompat {
         private static final MethodHandle GET_TOTAL_TIME_IN_CHUNK = resolve();
         private static boolean warnedExternalTrackerFailure;
@@ -1114,14 +934,11 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
     }
 
     private static final class InternalChunkActivityTracker {
-        private static final long TICKS_PER_SECOND = 20L;
-        private static final long CLEANUP_INTERVAL_TICKS = 20L * 10L;
-        private static final long FORGET_AFTER_TICKS = 20L * 60L * 30L;
-        private static final Map<Level, LevelState> STATES = new WeakHashMap<>();
+        private static final Map<Level, ChunkActivityLevelState> STATES = new WeakHashMap<>();
 
         private static long getTotalTimeInChunk(Level level, long chunkKey) {
             if (level.isClientSide) return 0L;
-            LevelState state = getState(level);
+            ChunkActivityLevelState state = getState(level);
             state.observeTime(level.getGameTime());
             return state.getSeconds(chunkKey);
         }
@@ -1129,7 +946,9 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
         private static void recordPlayerActivity(Player player) {
             Level level = player.level();
             if (level.isClientSide) return;
-            getState(level).recordPlayer(player, level.getGameTime());
+            getState(level).recordChunk(
+                    ChunkPos.asLong(player.chunkPosition().x, player.chunkPosition().z),
+                    level.getGameTime());
         }
 
         private static void clear() {
@@ -1138,70 +957,14 @@ public class NoTick #if FABRIC implements ModInitializer #endif{
             }
         }
 
-        private static LevelState getState(Level level) {
+        private static ChunkActivityLevelState getState(Level level) {
             synchronized (STATES) {
-                LevelState state = STATES.get(level);
+                ChunkActivityLevelState state = STATES.get(level);
                 if (state == null) {
-                    state = new LevelState();
+                    state = new ChunkActivityLevelState();
                     STATES.put(level, state);
                 }
                 return state;
-            }
-        }
-
-        private static final class LevelState {
-            private long lastObservedTick = Long.MIN_VALUE;
-            private long lastCleanupTick = Long.MIN_VALUE;
-            private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap secondsByChunk = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
-            private final it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap lastSeenTickByChunk = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
-
-            private LevelState() {
-                secondsByChunk.defaultReturnValue(0);
-                lastSeenTickByChunk.defaultReturnValue(Long.MIN_VALUE);
-            }
-
-            private void observeTime(long now) {
-                if (now < lastObservedTick) {
-                    secondsByChunk.clear();
-                    lastSeenTickByChunk.clear();
-                    lastCleanupTick = Long.MIN_VALUE;
-                }
-                lastObservedTick = now;
-
-                if (lastCleanupTick == Long.MIN_VALUE || now - lastCleanupTick >= CLEANUP_INTERVAL_TICKS) {
-                    cleanup(now);
-                    lastCleanupTick = now;
-                }
-            }
-
-            private void recordPlayer(Player player, long now) {
-                observeTime(now);
-                if (now % TICKS_PER_SECOND != 0L) return;
-
-                long key = ChunkPos.asLong(player.chunkPosition().x, player.chunkPosition().z);
-                if (lastSeenTickByChunk.get(key) == now) return;
-
-                int seconds = secondsByChunk.get(key);
-                if (seconds < Integer.MAX_VALUE) {
-                    secondsByChunk.put(key, seconds + 1);
-                }
-                lastSeenTickByChunk.put(key, now);
-            }
-
-            private long getSeconds(long chunkKey) {
-                return secondsByChunk.get(chunkKey);
-            }
-
-            private void cleanup(long now) {
-                var iterator = lastSeenTickByChunk.long2LongEntrySet().fastIterator();
-                while (iterator.hasNext()) {
-                    var entry = iterator.next();
-                    if (now - entry.getLongValue() > FORGET_AFTER_TICKS) {
-                        long key = entry.getLongKey();
-                        iterator.remove();
-                        secondsByChunk.remove(key);
-                    }
-                }
             }
         }
     }
