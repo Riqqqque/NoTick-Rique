@@ -1,3 +1,4 @@
+1.1.30 - Fixed FTB Chunks claim lookups running on client worlds, relicensed to LGPL-3.0-or-later, updated the packaged logo to the current NoTick icon, and added an automated test suite
 1.1.29 - Fixed config reloads on Forge and Fabric 1.20.1, raid whitelist overrides, active chunk tracking accuracy, command diagnostics, and loader compatibility
 1.1.28 - Restored clean build reliability after an upstream repository outage and refreshed the Gradle toolchain
 1.1.27 - Fixed Fabric login warnings, prevented unloaded-world player cache retention, made unknown modded items fail safe, clarified integration fallback status, and refreshed NeoForge support
